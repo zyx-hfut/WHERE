@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于项目规划阶段，仓库基线为 `v0.1.0-planning`。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.2.0-shell` 开发阶段，已完成可运行的 React + TypeScript + Vite 应用壳。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 
@@ -33,7 +33,20 @@
 
 ## 运行环境
 
-规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js，但尚未安装 Rust，因此尚未生成可编译的 Tauri 工程。
+规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js，但尚未安装 Rust，因此 Tauri 原生编译暂未验证。
+
+安装前端依赖后可运行：
+
+```bash
+npm install
+npm run dev
+```
+
+Tauri 桌面开发环境完整后可运行：
+
+```bash
+npm run tauri:dev
+```
 
 ## 许可证
 
