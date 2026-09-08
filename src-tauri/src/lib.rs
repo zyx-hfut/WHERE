@@ -143,6 +143,11 @@ fn get_items(state: State<'_, AppState>, list_id: String) -> Result<Vec<ItemDto>
 }
 
 #[tauri::command]
+fn search_items(state: State<'_, AppState>, query: String) -> Result<Vec<ItemDto>, String> {
+    with_database(&state, |database| database.search_items(query))
+}
+
+#[tauri::command]
 fn create_item(state: State<'_, AppState>, input: ItemInput) -> Result<ItemDto, String> {
     with_database_mut(&state, |database| database.create_item(input))
 }
@@ -321,6 +326,7 @@ pub fn run() {
             create_list,
             delete_list,
             get_items,
+            search_items,
             create_item,
             update_item,
             delete_item,

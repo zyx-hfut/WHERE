@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.5.0-account` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录、图片附件和本地账号系统。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.6.0-agent-read` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录、图片附件、本地账号和只读本地智能体查询。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

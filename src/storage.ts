@@ -47,6 +47,14 @@ export async function getItems(listId: string): Promise<Item[]> {
   return readLocal().items.filter((item) => item.listId === listId).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+export async function searchItems(query: string): Promise<Item[]> {
+  if (isTauri()) return invoke<Item[]>('search_items', { query })
+  const state = readLocal()
+  const normalized = query.trim().toLocaleLowerCase()
+  if (!normalized) return []
+  return state.items.filter((item) => [item.name, item.location, item.note || ''].some((value) => value.toLocaleLowerCase().includes(normalized))).sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 export function resetDemoData() {
   localStorage.removeItem(getStorageKey())
 }

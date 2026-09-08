@@ -234,6 +234,41 @@ impl Database {
             .map_err(|error| error.to_string())
     }
 
+    pub fn search_items(&self, query: String) -> Result<Vec<ItemDto>, String> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT i.id, i.list_id, l.name, i.name, i.location, i.note, i.icon, i.updated_at
+                 FROM items i JOIN item_lists l ON l.id = i.list_id
+                 WHERE i.name LIKE ?1 ESCAPE '\\'
+                    OR i.location LIKE ?1 ESCAPE '\\'
+                    OR COALESCE(i.note, '') LIKE ?1 ESCAPE '\\'
+                 ORDER BY i.updated_at DESC",
+            )
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![pattern], |row| {
+                Ok(ItemDto {
+                    id: row.get(0)?,
+                    list_id: row.get(1)?,
+                    list_name: row.get(2)?,
+                    name: row.get(3)?,
+                    location: row.get(4)?,
+                    note: row.get(5)?,
+                    icon: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
+    }
+
     pub fn create_item(&mut self, input: ItemInput) -> Result<ItemDto, String> {
         validate_item(&input)?;
         let id = uuid_like();
@@ -617,5 +652,22 @@ mod tests {
             database.remove_attachment(item.id).unwrap(),
             Some("attachments/a.png".into())
         );
+    }
+
+    #[test]
+    fn search_matches_name_location_and_note() {
+        let mut database = test_database();
+        database
+            .create_item(ItemInput {
+                list_id: "stored".into(),
+                name: "备用充电线".into(),
+                location: "床头柜第一个抽屉".into(),
+                note: Some("USB-C 白色".into()),
+                icon: None,
+            })
+            .unwrap();
+        assert_eq!(database.search_items("床头柜".into()).unwrap().len(), 1);
+        assert_eq!(database.search_items("USB-C".into()).unwrap().len(), 1);
+        assert!(database.search_items("不存在".into()).unwrap().is_empty());
     }
 }

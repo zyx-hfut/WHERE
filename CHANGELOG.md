@@ -2,6 +2,27 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.6.0-agent-read] - 2026-09-08
+
+### Added
+
+- 增加本地只读智能体检索：按物品名称、位置和备注查询。
+- 支持“电子设备”等简单模糊类别查询。
+- 智能体界面显示理解请求、检索本地数据、整理结果三个步骤。
+- 增加智能体能力文档 `knowledge/agent-capabilities.md`。
+- 增加 LLM 预设的名称、Base URL、模型字段保存和加载入口。
+- 明确 API Key 暂不写入本地数据库，后续接入系统安全存储。
+- 智能体只读查询不会调用物品写入接口。
+- 增加名称、位置、备注检索测试。
+
+### Verified
+
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.5.0-account] - 2026-09-08
 
 ### Added
