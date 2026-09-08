@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, getItemAttachment, getItemHistory, getItems, getLists, readItemAttachment, saveItemAttachment, updateItem } from './storage'
 import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccountPassword } from './auth'
-import { runLocalAgent } from './agent'
+import { confirmAgentAction, defaultConfig, runAgent, runLocalAgent } from './agent'
+import type { AgentAnswer, AgentProviderConfig } from './agent'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
@@ -59,6 +60,12 @@ function App() {
     void getItems(activeList).then(setItems).catch((cause) => setError(cause instanceof Error ? cause.message : '加载物品失败'))
   }, [activeList, authenticated])
 
+  useEffect(() => {
+    const refresh = () => { void refreshLists().then(() => activeList ? getItems(activeList).then(setItems) : undefined) }
+    window.addEventListener('where:data-changed', refresh)
+    return () => window.removeEventListener('where:data-changed', refresh)
+  }, [activeList, authenticated])
+
   const handleLogin = async (name: string, password: string) => { const session = await loginAccount(name, password); setAuthenticated(true); setUsername(session.username); setError('') }
   const handleRegister = async (name: string, password: string) => { const result = await registerAccount(name, password); setAuthenticated(true); setUsername(result.session.username); setRecoveryKey(result.recoveryKey); setError('') }
   const handleResetPassword = async (name: string, key: string, password: string) => { await resetAccountPassword(name, key, password); setError('密码已重置，请使用新密码登录') }
@@ -111,11 +118,11 @@ function App() {
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
-      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.6.0 · Agent Read</div></div>
+      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.7.0 · Agent Write</div></div>
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteList={removeList} />}
-      {page === 'agent' && <AgentReadPage onNavigateToItems={() => setPage('items')} />}
+      {page === 'agent' && <AgentWritePage onNavigateToItems={() => setPage('items')} />}
         {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
     </main>
     {error && <div className="toast" role="alert"><span>!</span>{error}<button onClick={() => setError('')}>×</button></div>}
@@ -176,6 +183,33 @@ function Modal({ children, onClose }: { children: ReactNode; onClose: () => void
 
 function HistoryModal({ item, history, onClose }: { item: Item; history: HistoryEntry[]; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">变更审计</div><h2>{item.name}的历史</h2></div><button className="close-button" onClick={onClose}>×</button></div>{history.length ? <div className="history-list">{history.map((entry) => <div className="history-entry" key={entry.id}><span className="history-dot" /><div><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small>{entry.action === 'updated' && entry.beforeJson && entry.afterJson && <p>{JSON.parse(entry.beforeJson).location}　→　{JSON.parse(entry.afterJson).location}</p>}</div></div>)}</div> : <div className="history-empty">暂无历史记录</div>}</Modal> }
 
+function AgentWritePage({ onNavigateToItems }: { onNavigateToItems: () => void }) {
+  const [message, setMessage] = useState('')
+  const [answer, setAnswer] = useState<AgentAnswer | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [config, setConfig] = useState<AgentProviderConfig>(() => {
+    try { return { ...defaultConfig, ...JSON.parse(localStorage.getItem('where.agent.preset') || '{}'), apiKey: '' } as AgentProviderConfig }
+    catch { return { ...defaultConfig } }
+  })
+  const [showSettings, setShowSettings] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); if (!message.trim() || busy) return
+    setBusy(true); setError('')
+    try { setAnswer(await runAgent(message.trim(), config)) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '智能体运行失败') }
+    finally { setBusy(false) }
+  }
+  const confirm = async () => { if (!answer?.pendingAction) return; setBusy(true); setError(''); try { const text = await confirmAgentAction(answer.pendingAction); setAnswer({ ...answer, text, pendingAction: undefined, steps: [...answer.steps.slice(0, -1), { name: '执行本地操作', detail: '事务已提交，历史记录已保存', status: 'done' }, { name: '整理结果', detail: text, status: 'current' }] }) } catch (cause) { setError(cause instanceof Error ? cause.message : '执行操作失败') } finally { setBusy(false) } }
+  const saveSettings = (next: AgentProviderConfig) => { const { apiKey: _apiKey, ...persisted } = next; localStorage.setItem('where.agent.preset', JSON.stringify(persisted)); setConfig(next); setShowSettings(false) }
+  return <><header className="topbar"><div><div className="eyebrow">WHERE AI · TOOL CONTROLLED</div><h1>智能体</h1></div><div className="agent-model"><span className="status-dot" />{config.provider === 'deepseek' ? 'DeepSeek Provider' : 'Mock Provider'} <button className="agent-settings-button" onClick={() => setShowSettings(true)}>设置</button></div></header><section className="agent-layout"><div className="agent-welcome"><div className="sparkle">✦</div><h2>让智能体帮你管理物品。</h2><p>大模型负责理解自然语言，本地工具负责检索、校验和执行。任何新增、修改或删除都会先展示预览。</p><div className="quick-prompts"><button onClick={() => setMessage('帮我记录：雨伞放在书柜的架子上')}>新增雨伞位置 <span>→</span></button><button onClick={() => setMessage('电动车现在放在宿舍楼下')}>修改电动车位置 <span>→</span></button><button onClick={() => setMessage('给雨伞添加备注：黑色长柄')}>添加物品备注 <span>→</span></button></div></div><div className="workflow-card"><div className="workflow-title"><span>{answer ? '本次工作流' : '工作流预览'}</span><span className="live-pill">{config.provider === 'mock' ? 'Mock' : 'DeepSeek'}</span></div>{(answer?.steps || [{ name: '检索能力文档', detail: '等待你的问题', status: 'current' as const }, { name: '理解请求', detail: '由 Provider 生成结构化意图', status: 'current' as const }, { name: '等待确认', detail: '写操作执行前必须确认', status: 'current' as const }]).map((step, index) => <span key={step.name + index}><WorkflowStep current={step.status !== 'done'} title={step.name} detail={step.detail} />{index < (answer?.steps.length || 3) - 1 && <div className="workflow-line" />}</span>)}</div></section>{answer && <section className="agent-answer"><div className="answer-label">{answer.provider === 'mock' ? 'Mock Provider' : 'DeepSeek'} · {answer.plan.intent}</div><p>{answer.text}</p>{answer.items.length > 0 && <div className="answer-items">{answer.items.map((item) => <button key={item.id} onClick={onNavigateToItems}><strong>{item.name}</strong><span>{item.listName} {item.location}</span></button>)}</div>}{answer.pendingAction && <div className="action-preview"><div><strong>即将执行</strong><span>{answer.pendingAction.description}</span></div><div className="action-buttons"><button className="ghost-button" onClick={() => setAnswer({ ...answer, pendingAction: undefined, text: '已取消本次操作。' })}>取消</button><button className="primary-button" disabled={busy} onClick={() => void confirm()}>确认执行</button></div></div>}</section>}{error && <div className="agent-error" role="alert">{error}</div>}<section className="chat-composer"><form onSubmit={submit}><div className="composer-tools"><span className="composer-icon">✦</span><span>{config.name}</span><span className="composer-divider" /><button type="button" onClick={() => setShowSettings(true)}>配置 Provider</button></div><div className="composer-input"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：帮我记录雨伞放在书柜架子上" /><button className="send-button" type="submit" disabled={!message.trim() || busy}>{busy ? '…' : '↑'}</button></div></form><div className="composer-foot">Mock Provider 可无 Key 测试；DeepSeek Key 只保存在当前运行内存</div></section>{showSettings && <AgentProviderSettings config={config} onClose={() => setShowSettings(false)} onSave={saveSettings} />}</>
+}
+
+function AgentProviderSettings({ config, onClose, onSave }: { config: AgentProviderConfig; onClose: () => void; onSave: (config: AgentProviderConfig) => void }) {
+  const [draft, setDraft] = useState(config)
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">LLM PROVIDER</div><h2>智能体 Provider</h2></div><button className="close-button" onClick={onClose}>×</button></div><label>Provider<select value={draft.provider} onChange={(event) => setDraft({ ...draft, provider: event.target.value as AgentProviderConfig['provider'] })}><option value="mock">Mock Provider（无 Key）</option><option value="deepseek">DeepSeek（需要本地 Key）</option></select></label><label>预设名称<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label>Base URL<input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} placeholder="https://api.deepseek.com" /></label><label>模型名称<input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="deepseek-v4-flash" /></label><label>API Key <span className="optional">仅本次运行内存保存，不写入 localStorage</span><input type="password" value={draft.apiKey || ''} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="在本机输入，不要发送到聊天" /></label><div className="modal-actions"><button className="ghost-button" onClick={onClose}>取消</button><button className="primary-button" onClick={() => onSave(draft)}>保存设置</button></div></Modal>
+}
+
 function AgentReadPage({ onNavigateToItems }: { onNavigateToItems: () => void }) {
   const [message, setMessage] = useState('')
   const [answer, setAnswer] = useState<Awaited<ReturnType<typeof runLocalAgent>> | null>(null)
@@ -209,7 +243,7 @@ function AuthPage({ onLogin, onRegister, onResetPassword, error }: { onLogin: (u
 
 function RecoveryModal({ recoveryKey, onClose }: { recoveryKey: string; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">请立即保存</div><h2>你的恢复密钥</h2></div><button className="close-button" onClick={onClose}>×</button></div><p className="recovery-warning">这是恢复账号的唯一凭据，关闭后 WHERE 不会再次显示。请把它保存在安全的位置。</p><div className="recovery-key">{recoveryKey}</div><div className="modal-actions"><button className="primary-button" onClick={() => void navigator.clipboard?.writeText(recoveryKey)}>复制密钥</button><button className="outline-button" onClick={onClose}>我已保存</button></div></Modal> }
 
-function ProfilePage({ username, theme, setTheme, onLogout }: { username: string; theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onLogout: () => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">{username.slice(0, 1).toUpperCase()}</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">{username.slice(0, 1).toUpperCase()}</div><div><h2>{username}</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button" onClick={onLogout}>退出登录</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.6.0 · MIT License" arrow /></div></section></> }
+function ProfilePage({ username, theme, setTheme, onLogout }: { username: string; theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onLogout: () => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">{username.slice(0, 1).toUpperCase()}</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">{username.slice(0, 1).toUpperCase()}</div><div><h2>{username}</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button" onClick={onLogout}>退出登录</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.7.0 · MIT License" arrow /></div></section></> }
 
 function SettingRow({ icon, title, description, arrow }: { icon: string; title: string; description: string; arrow?: boolean }) { return <button className="setting-row setting-button"><span className="setting-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><span>{description}</span></span>{arrow && <span className="setting-arrow">›</span>}</button> }
 

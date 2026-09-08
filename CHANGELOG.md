@@ -2,6 +2,34 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.7.0-agent-write] - 2026-09-08
+
+### Added
+
+- 增加统一 Agent Provider 接口。
+- 增加 Mock Provider，可在没有 API Key 时验证智能体意图和工具工作流。
+- 增加 DeepSeek OpenAI-compatible Provider，支持运行时配置 Base URL、模型和 API Key。
+- LLM 先读取能力文档 RAG，再生成结构化意图计划。
+- 支持智能体规划查询、新增物品、修改位置、删除物品和更新备注。
+- 写操作执行前显示变更预览，必须用户确认。
+- 确认后复用现有 SQLite 事务和历史记录入口。
+- 增加工具意图校验，拒绝未注册意图和 SQL 类越权操作。
+- 增加 Mock Provider 结构化计划测试。
+
+### Security note
+
+- API Key 只在当前页面内存中使用，不写入 localStorage、源码或 Git。
+- 生产版仍应将 API Key 迁移到操作系统安全存储，并将 Provider 请求移至 Rust 后端。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.6.1-auth-ui-fix] - 2026-09-08
 
 ### Fixed

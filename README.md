@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.6.0-agent-read` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录、图片附件、本地账号和只读本地智能体查询。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.7.0-agent-write` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录、图片附件、本地账号，以及支持 Mock/DeepSeek Provider 的结构化智能体写操作。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 
@@ -33,7 +33,7 @@
 
 ## 运行环境
 
-规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js、Rust 和 Tauri CLI；SQLite、Argon2 依赖已经下载并通过编译验证。
+规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js、Rust 和 Tauri CLI；SQLite、Argon2 依赖已经下载并通过编译验证。DeepSeek API Key 仅支持运行时内存输入，不应提交到仓库。
 
 安装前端依赖后可运行：
 
