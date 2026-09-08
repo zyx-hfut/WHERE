@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { Attachment, HistoryEntry, Item, ItemInput, ItemList } from './types'
+import { getCurrentAccountId } from './auth'
 
-const STORAGE_KEY = 'where.v0.3.demo'
+const LEGACY_STORAGE_KEY = 'where.v0.3.demo'
 
 type LocalState = { lists: ItemList[]; items: Item[]; history: HistoryEntry[]; attachments?: Record<string, Attachment> }
 
@@ -23,14 +24,18 @@ function isTauri() {
 }
 
 function readLocal(): LocalState {
-  const saved = localStorage.getItem(STORAGE_KEY)
+  const storageKey = getStorageKey()
+  let saved = localStorage.getItem(storageKey)
+  if (!saved && storageKey !== LEGACY_STORAGE_KEY && localStorage.getItem('where.v0.5.legacy-migrated') !== '1' && localStorage.getItem(LEGACY_STORAGE_KEY)) { saved = localStorage.getItem(LEGACY_STORAGE_KEY); if (saved) { localStorage.setItem(storageKey, saved); localStorage.setItem('where.v0.5.legacy-migrated', '1') } }
   if (!saved) return structuredClone(defaultState)
   try { return JSON.parse(saved) as LocalState } catch { return structuredClone(defaultState) }
 }
 
 function writeLocal(state: LocalState) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  localStorage.setItem(getStorageKey(), JSON.stringify(state))
 }
+
+function getStorageKey() { return getCurrentAccountId() ? `where.v0.5.data.${getCurrentAccountId()}` : LEGACY_STORAGE_KEY }
 
 export async function getLists(): Promise<ItemList[]> {
   if (isTauri()) return invoke<ItemList[]>('get_lists')
@@ -43,7 +48,7 @@ export async function getItems(listId: string): Promise<Item[]> {
 }
 
 export function resetDemoData() {
-  localStorage.removeItem(STORAGE_KEY)
+  localStorage.removeItem(getStorageKey())
 }
 
 export async function createItem(input: ItemInput): Promise<Item> {

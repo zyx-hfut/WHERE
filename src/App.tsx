@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, getItemAttachment, getItemHistory, getItems, getLists, readItemAttachment, saveItemAttachment, updateItem } from './storage'
+import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccountPassword } from './auth'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
@@ -23,6 +24,10 @@ function App() {
   const [historyItem, setHistoryItem] = useState<Item | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [username, setUsername] = useState('')
+  const [recoveryKey, setRecoveryKey] = useState('')
   const [error, setError] = useState('')
 
   const refreshLists = async (preferredId?: string) => {
@@ -33,6 +38,11 @@ function App() {
   }
 
   useEffect(() => {
+    void getAuthState().then((state) => { setAuthenticated(state.authenticated); setUsername(state.username || '') }).catch((cause) => setError(cause instanceof Error ? cause.message : '读取账号状态失败')).finally(() => setAuthLoading(false))
+  }, [])
+
+  useEffect(() => {
+    if (!authenticated) { setLoading(false); return }
     void (async () => {
       try {
         const nextLists = await getLists()
@@ -41,12 +51,17 @@ function App() {
       } catch (cause) { setError(cause instanceof Error ? cause.message : '加载数据失败') }
       finally { setLoading(false) }
     })()
-  }, [])
+  }, [authenticated])
 
   useEffect(() => {
-    if (!activeList) return
+    if (!authenticated || !activeList) return
     void getItems(activeList).then(setItems).catch((cause) => setError(cause instanceof Error ? cause.message : '加载物品失败'))
-  }, [activeList])
+  }, [activeList, authenticated])
+
+  const handleLogin = async (name: string, password: string) => { const session = await loginAccount(name, password); setAuthenticated(true); setUsername(session.username); setError('') }
+  const handleRegister = async (name: string, password: string) => { const result = await registerAccount(name, password); setAuthenticated(true); setUsername(result.session.username); setRecoveryKey(result.recoveryKey); setError('') }
+  const handleResetPassword = async (name: string, key: string, password: string) => { await resetAccountPassword(name, key, password); setError('密码已重置，请使用新密码登录') }
+  const handleLogout = async () => { await logoutAccount(); setAuthenticated(false); setUsername(''); setLists([]); setItems([]); setPage('items') }
 
   const activeListName = useMemo(() => lists.find((list) => list.id === activeList)?.name || '物品', [lists, activeList])
 
@@ -84,6 +99,8 @@ function App() {
     catch (cause) { setError(cause instanceof Error ? cause.message : '删除列表失败') }
   }
 
+  if (authLoading) return <div className="auth-loading"><span className="spinner" />正在检查本地账号…</div>
+  if (!authenticated) return <AuthPage onLogin={handleLogin} onRegister={handleRegister} onResetPassword={handleResetPassword} error={error} />
   return <div className={`app-shell ${theme === 'dark' ? 'theme-dark' : ''}`}>
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">W</span><span>WHERE</span></div>
@@ -93,17 +110,18 @@ function App() {
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
-      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.4.0 · Media</div></div>
+      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.5.0 · Account</div></div>
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteList={removeList} />}
       {page === 'agent' && <AgentPage onNavigateToItems={() => setPage('items')} />}
-      {page === 'profile' && <ProfilePage theme={theme} setTheme={setTheme} />}
+        {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
     </main>
     {error && <div className="toast" role="alert"><span>!</span>{error}<button onClick={() => setError('')}>×</button></div>}
     {composer && <ItemComposer lists={lists} activeList={activeList} state={composer} onClose={() => setComposer(null)} onSave={saveItem} />}
     {showListComposer && <ListComposer onClose={() => setShowListComposer(false)} onSave={saveList} />}
     {historyItem && <HistoryModal item={historyItem} history={history} onClose={() => setHistoryItem(null)} />}
+    {recoveryKey && <RecoveryModal recoveryKey={recoveryKey} onClose={() => setRecoveryKey('')} />}
   </div>
 }
 
@@ -161,7 +179,25 @@ function AgentPage({ onNavigateToItems }: { onNavigateToItems: () => void }) { c
 
 function WorkflowStep({ title, detail, current = false }: { title: string; detail: string; current?: boolean }) { return <div className={`workflow-step ${current ? 'current' : 'done'}`}><span className="step-check">{current ? '✦' : '✓'}</span><div><strong>{title}</strong><small>{detail}</small></div></div> }
 
-function ProfilePage({ theme, setTheme }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">Z</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">Z</div><div><h2>ZYX</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button">切换账号</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.4.0 · MIT License" arrow /></div></section></> }
+function AuthPage({ onLogin, onRegister, onResetPassword, error }: { onLogin: (username: string, password: string) => Promise<void>; onRegister: (username: string, password: string) => Promise<void>; onResetPassword: (username: string, recoveryKey: string, password: string) => Promise<void>; error: string }) {
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [recoveryKey, setRecoveryKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [localError, setLocalError] = useState('')
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setLocalError('')
+    try { if (mode === 'login') await onLogin(username, password); else if (mode === 'register') await onRegister(username, password); else await onResetPassword(username, recoveryKey, password) }
+    catch (cause) { setLocalError(cause instanceof Error ? cause.message : '操作失败') }
+    finally { setBusy(false) }
+  }
+  return <div className="auth-page"><div className="auth-card"><div className="brand auth-brand"><span className="brand-mark">W</span><span>WHERE</span></div><div className="eyebrow">本地优先 · 私密保存</div><h1>{mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建本地账号' : '恢复账号密码'}</h1><p className="auth-description">{mode === 'reset' ? '使用注册时保存的恢复密钥重置密码。' : '你的物品数据默认只保存在当前设备。'}</p><form onSubmit={submit}>{mode !== 'reset' && <label>用户名<input autoFocus value={username} onChange={(event) => setUsername(event.target.value)} placeholder="至少 2 个字符" /></label>}{mode === 'reset' && <label>用户名<input autoFocus value={username} onChange={(event) => setUsername(event.target.value)} /></label>}{mode === 'reset' && <label>恢复密钥<input value={recoveryKey} onChange={(event) => setRecoveryKey(event.target.value)} placeholder="WHERE-..." /></label>}<label>{mode === 'reset' ? '新密码' : '密码'}<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="至少 8 个字符" /></label>{(localError || error) && <div className="auth-error">{localError || error}</div>}<button className="primary-button auth-submit" disabled={busy}>{busy ? '处理中…' : mode === 'login' ? '登录' : mode === 'register' ? '创建账号' : '重置密码'}</button></form><div className="auth-links">{mode === 'login' && <><button onClick={() => setMode('register')}>创建新账号</button><button onClick={() => setMode('reset')}>忘记密码？</button></>}{mode !== 'login' && <button onClick={() => setMode('login')}>返回登录</button>}</div><small className="auth-footnote">密码使用 Argon2id 保护；恢复密钥只在创建账号时显示一次。</small></div></div>
+}
+
+function RecoveryModal({ recoveryKey, onClose }: { recoveryKey: string; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">请立即保存</div><h2>你的恢复密钥</h2></div><button className="close-button" onClick={onClose}>×</button></div><p className="recovery-warning">这是恢复账号的唯一凭据，关闭后 WHERE 不会再次显示。请把它保存在安全的位置。</p><div className="recovery-key">{recoveryKey}</div><div className="modal-actions"><button className="primary-button" onClick={() => void navigator.clipboard?.writeText(recoveryKey)}>复制密钥</button><button className="outline-button" onClick={onClose}>我已保存</button></div></Modal> }
+
+function ProfilePage({ username, theme, setTheme, onLogout }: { username: string; theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onLogout: () => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">{username.slice(0, 1).toUpperCase()}</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">{username.slice(0, 1).toUpperCase()}</div><div><h2>{username}</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button" onClick={onLogout}>退出登录</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.5.0 · MIT License" arrow /></div></section></> }
 
 function SettingRow({ icon, title, description, arrow }: { icon: string; title: string; description: string; arrow?: boolean }) { return <button className="setting-row setting-button"><span className="setting-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><span>{description}</span></span>{arrow && <span className="setting-arrow">›</span>}</button> }
 

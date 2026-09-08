@@ -2,6 +2,26 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.5.0-account] - 2026-09-08
+
+### Added
+
+- 增加本地账号数据库，支持注册、登录、退出和切换账号。
+- 使用 Argon2id 哈希保护密码和恢复密钥，数据库不保存明文凭据。
+- 注册时生成一次性恢复密钥，可用于本地重置密码。
+- 每个账号拥有独立的 SQLite 数据库和附件目录。
+- 首个账号注册时自动迁移旧版无账号数据，并保留 legacy backup。
+- 浏览器 fallback 使用独立账号数据空间，且不再以明文保存密码。
+- 增加认证页面、恢复密钥提示和账户设置退出入口。
+
+### Verified
+
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt`
+- `cargo check`
+- `cargo test`
+
 ## [0.4.0-history-media] - 2026-09-08
 
 ### Added
