@@ -35,6 +35,18 @@ pub struct HistoryDto {
     pub created_at: i64,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentDto {
+    pub id: String,
+    pub item_id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInput {
@@ -85,6 +97,16 @@ impl Database {
                    before_json TEXT,
                    after_json TEXT,
                    created_at INTEGER NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS item_attachments (
+                   id TEXT PRIMARY KEY NOT NULL,
+                   item_id TEXT NOT NULL UNIQUE REFERENCES items(id) ON DELETE CASCADE,
+                   file_name TEXT NOT NULL,
+                   mime_type TEXT NOT NULL,
+                   size INTEGER NOT NULL,
+                   relative_path TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
                  );
                  CREATE INDEX IF NOT EXISTS idx_items_list_id ON items(list_id);
                  CREATE INDEX IF NOT EXISTS idx_items_updated_at ON items(updated_at DESC);
@@ -258,13 +280,21 @@ impl Database {
         self.item(id)
     }
 
-    pub fn delete_item(&mut self, id: String) -> Result<(), String> {
+    pub fn delete_item(&mut self, id: String) -> Result<Option<String>, String> {
         let timestamp = now_ms();
         let transaction = self
             .connection
             .transaction()
             .map_err(|error| error.to_string())?;
         let before = snapshot_json(&transaction, &id)?;
+        let attachment_path: Option<String> = transaction
+            .query_row(
+                "SELECT relative_path FROM item_attachments WHERE item_id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
         let deleted = transaction
             .execute("DELETE FROM items WHERE id = ?1", params![id])
             .map_err(|error| error.to_string())?;
@@ -274,7 +304,8 @@ impl Database {
         transaction
             .execute("INSERT INTO item_history (item_id, action, before_json, after_json, created_at) VALUES (?1, 'deleted', ?2, NULL, ?3)", params![id, before, timestamp])
             .map_err(|error| error.to_string())?;
-        transaction.commit().map_err(|error| error.to_string())
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(attachment_path)
     }
 
     pub fn item(&self, id: String) -> Result<ItemDto, String> {
@@ -304,6 +335,115 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())
     }
+
+    pub fn attachment(&self, item_id: String) -> Result<Option<AttachmentDto>, String> {
+        self.connection
+            .query_row(
+                "SELECT id, item_id, file_name, mime_type, size, created_at, updated_at FROM item_attachments WHERE item_id = ?1",
+                params![item_id],
+                |row| {
+                    Ok(AttachmentDto {
+                        id: row.get(0)?,
+                        item_id: row.get(1)?,
+                        file_name: row.get(2)?,
+                        mime_type: row.get(3)?,
+                        size: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn attachment_path(&self, item_id: String) -> Result<Option<String>, String> {
+        self.connection
+            .query_row(
+                "SELECT relative_path FROM item_attachments WHERE item_id = ?1",
+                params![item_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn save_attachment(
+        &mut self,
+        item_id: String,
+        file_name: String,
+        mime_type: String,
+        size: i64,
+        relative_path: String,
+    ) -> Result<AttachmentDto, String> {
+        if size <= 0 || size > 10 * 1024 * 1024 {
+            return Err("图片大小必须在 1B 到 10MB 之间".to_string());
+        }
+        if !mime_type.starts_with("image/") {
+            return Err("只支持图片文件".to_string());
+        }
+        let timestamp = now_ms();
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        ensure_item_exists(&transaction, &item_id)?;
+        let before = attachment_json(&transaction, &item_id)?;
+        let attachment_id = uuid_like();
+        transaction
+            .execute(
+                "INSERT INTO item_attachments (id, item_id, file_name, mime_type, size, relative_path, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                 ON CONFLICT(item_id) DO UPDATE SET file_name = excluded.file_name, mime_type = excluded.mime_type, size = excluded.size, relative_path = excluded.relative_path, updated_at = excluded.updated_at",
+                params![attachment_id, item_id, file_name, mime_type, size, relative_path, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        let after = attachment_json(&transaction, &item_id)?;
+        transaction
+            .execute(
+                "INSERT INTO item_history (item_id, action, before_json, after_json, created_at) VALUES (?1, 'attachment_updated', ?2, ?3, ?4)",
+                params![item_id, before, after, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        self.attachment(item_id)?
+            .ok_or_else(|| "保存图片后无法读取元数据".to_string())
+    }
+
+    pub fn remove_attachment(&mut self, item_id: String) -> Result<Option<String>, String> {
+        let timestamp = now_ms();
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        let path: Option<String> = transaction
+            .query_row(
+                "SELECT relative_path FROM item_attachments WHERE item_id = ?1",
+                params![item_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if path.is_none() {
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(None);
+        }
+        let before = attachment_json(&transaction, &item_id)?;
+        transaction
+            .execute(
+                "DELETE FROM item_attachments WHERE item_id = ?1",
+                params![item_id],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "INSERT INTO item_history (item_id, action, before_json, after_json, created_at) VALUES (?1, 'attachment_deleted', ?2, NULL, ?3)",
+                params![item_id, before, timestamp],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok(path)
+    }
 }
 
 fn ensure_list_exists(connection: &Connection, id: &str) -> Result<(), String> {
@@ -319,6 +459,35 @@ fn ensure_list_exists(connection: &Connection, id: &str) -> Result<(), String> {
     } else {
         Err("目标列表不存在".to_string())
     }
+}
+
+fn ensure_item_exists(connection: &Connection, id: &str) -> Result<(), String> {
+    let exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM items WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if exists {
+        Ok(())
+    } else {
+        Err("物品不存在".to_string())
+    }
+}
+
+fn attachment_json(connection: &Connection, item_id: &str) -> Result<Option<String>, String> {
+    let attachment = connection
+        .query_row(
+            "SELECT id, item_id, file_name, mime_type, size, created_at, updated_at FROM item_attachments WHERE item_id = ?1",
+            params![item_id],
+            |row| Ok(AttachmentDto { id: row.get(0)?, item_id: row.get(1)?, file_name: row.get(2)?, mime_type: row.get(3)?, size: row.get(4)?, created_at: row.get(5)?, updated_at: row.get(6)? }),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    attachment
+        .map(|value| serde_json::to_string(&value).map_err(|error| error.to_string()))
+        .transpose()
 }
 
 fn snapshot_json(connection: &Connection, id: &str) -> Result<String, String> {
@@ -419,5 +588,34 @@ mod tests {
             })
             .expect("item should be created");
         assert!(database.delete_list("stored".into()).is_err());
+    }
+
+    #[test]
+    fn attachment_metadata_is_replaced_and_removed() {
+        let mut database = test_database();
+        let item = database
+            .create_item(ItemInput {
+                list_id: "placed".into(),
+                name: "相机".into(),
+                location: "书桌".into(),
+                note: None,
+                icon: None,
+            })
+            .expect("item should be created");
+        let attachment = database
+            .save_attachment(
+                item.id.clone(),
+                "camera.png".into(),
+                "image/png".into(),
+                128,
+                "attachments/a.png".into(),
+            )
+            .expect("attachment should be saved");
+        assert_eq!(attachment.file_name, "camera.png");
+        assert!(database.attachment(item.id.clone()).unwrap().is_some());
+        assert_eq!(
+            database.remove_attachment(item.id).unwrap(),
+            Some("attachments/a.png".into())
+        );
     }
 }

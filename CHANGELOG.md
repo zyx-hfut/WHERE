@@ -2,6 +2,26 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.4.0-history-media] - 2026-09-08
+
+### Added
+
+- 增加 `item_attachments` SQLite 表和唯一物品图片关系。
+- 图片保存到应用数据目录的 `attachments` 文件夹，数据库只记录安全的文件名和元数据。
+- 支持图片上传、替换、读取、移除，以及删除物品时清理关联文件。
+- 图片大小限制为 10MB，仅接受 `image/*` 类型。
+- 图片变更写入物品历史记录。
+- 浏览器预览使用 Data URL fallback，桌面端使用 Tauri 文件存储。
+- 增加图片附件数据库测试。
+
+### Verified
+
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`（4 项数据库测试）
+
 ## [0.3.0-items] - 2026-09-08
 
 ### Added

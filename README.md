@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.3.0-items` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注和历史记录。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.4.0-history-media` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录和图片附件。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 
@@ -33,7 +33,7 @@
 
 ## 运行环境
 
-规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js、Rust 和 Tauri CLI；SQLite Rust 依赖已经下载并通过 `cargo check`。
+规划中的 Tauri 开发需要 Node.js、Rust、Windows WebView2/C++ 构建工具；移动端还需要 Android SDK，iOS 构建需要 macOS + Xcode。当前环境已检测到 Node.js、Rust 和 Tauri CLI；SQLite Rust 依赖已经下载并通过 `cargo check`，媒体数据层还需执行本阶段测试验证。
 
 安装前端依赖后可运行：
 

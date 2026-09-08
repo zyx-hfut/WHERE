@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { createItem, createList, deleteItem, deleteList, getItemHistory, getItems, getLists, updateItem } from './storage'
+import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, getItemAttachment, getItemHistory, getItems, getLists, readItemAttachment, saveItemAttachment, updateItem } from './storage'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
 
-const actionLabels = { created: '新建物品', updated: '修改物品', deleted: '删除物品' }
+const actionLabels = { created: '新建物品', updated: '修改物品', deleted: '删除物品', attachment_updated: '更新图片', attachment_deleted: '删除图片' }
 
 function formatTime(timestamp: number) {
   if (!timestamp) return '未知时间'
@@ -93,7 +93,7 @@ function App() {
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
-      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.3.0 · Items</div></div>
+      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.4.0 · Media</div></div>
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteList={removeList} />}
@@ -124,7 +124,20 @@ function ItemsPage({ lists, activeList, activeListName, items, loading, onSelect
 }
 
 function ItemRow({ item, onEdit, onDelete, onHistory }: { item: Item; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void }) {
-  return <article className="item-row"><div className="item-icon">{item.icon}</div><div className="item-main"><div className="item-title"><strong>{item.name}</strong><span className="list-pill">{item.listName}</span></div><div className="item-location"><span className="location-pin">⌖</span>{item.location}</div>{item.note && <div className="item-note">▤ {item.note}</div>}</div><div className="item-meta"><span>{formatTime(item.updatedAt)}</span><div className="row-actions"><button onClick={() => onEdit(item)}>编辑</button><button onClick={() => onHistory(item)}>历史</button><button className="danger-text" onClick={() => onDelete(item)}>删除</button></div></div></article>
+  return <article className="item-row"><AttachmentPreview itemId={item.id} fallback={item.icon} /><div className="item-main"><div className="item-title"><strong>{item.name}</strong><span className="list-pill">{item.listName}</span></div><div className="item-location"><span className="location-pin">⌖</span>{item.location}</div>{item.note && <div className="item-note">▤ {item.note}</div>}</div><div className="item-meta"><span>{formatTime(item.updatedAt)}</span><div className="row-actions"><button onClick={() => onEdit(item)}>编辑</button><button onClick={() => onHistory(item)}>历史</button><label className="image-action">图片<input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void saveItemAttachment(item.id, file).then(() => window.dispatchEvent(new CustomEvent('where:attachment-updated'))); event.currentTarget.value = '' }} /></label><button onClick={() => void deleteItemAttachment(item.id).then(() => window.dispatchEvent(new CustomEvent('where:attachment-updated')))}>移除图片</button><button className="danger-text" onClick={() => onDelete(item)}>删除</button></div></div></article>
+}
+
+function AttachmentPreview({ itemId, fallback }: { itemId: string; fallback: string }) {
+  const [src, setSrc] = useState('')
+  useEffect(() => {
+    let objectUrl = ''
+    const load = async () => { const attachment = await getItemAttachment(itemId); if (!attachment) { setSrc(''); return }; const bytes = await readItemAttachment(itemId); if (!bytes) return; const copy = new Uint8Array(bytes); objectUrl = URL.createObjectURL(new Blob([copy.buffer as ArrayBuffer], { type: attachment.mimeType })); setSrc(objectUrl) }
+    void load()
+    const refresh = () => { void load() }
+    window.addEventListener('where:attachment-updated', refresh)
+    return () => { window.removeEventListener('where:attachment-updated', refresh); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [itemId])
+  return <div className={`item-icon ${src ? 'has-image' : ''}`}>{src ? <img src={src} alt="" /> : fallback}</div>
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) { return <div className="empty-state"><div className="empty-art">⌂</div><h3>这里还没有物品</h3><p>从记录一件你经常找不到的东西开始。</p><button className="secondary-button" onClick={onAdd}>添加第一件物品</button></div> }
@@ -148,7 +161,7 @@ function AgentPage({ onNavigateToItems }: { onNavigateToItems: () => void }) { c
 
 function WorkflowStep({ title, detail, current = false }: { title: string; detail: string; current?: boolean }) { return <div className={`workflow-step ${current ? 'current' : 'done'}`}><span className="step-check">{current ? '✦' : '✓'}</span><div><strong>{title}</strong><small>{detail}</small></div></div> }
 
-function ProfilePage({ theme, setTheme }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">Z</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">Z</div><div><h2>ZYX</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button">切换账号</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.3.0 · MIT License" arrow /></div></section></> }
+function ProfilePage({ theme, setTheme }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">Z</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">Z</div><div><h2>ZYX</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button">切换账号</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.4.0 · MIT License" arrow /></div></section></> }
 
 function SettingRow({ icon, title, description, arrow }: { icon: string; title: string; description: string; arrow?: boolean }) { return <button className="setting-row setting-button"><span className="setting-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><span>{description}</span></span>{arrow && <span className="setting-arrow">›</span>}</button> }
 

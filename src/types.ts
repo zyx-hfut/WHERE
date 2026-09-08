@@ -29,8 +29,19 @@ export type ItemInput = {
 export type HistoryEntry = {
   id: number
   itemId: string
-  action: 'created' | 'updated' | 'deleted'
+  action: 'created' | 'updated' | 'deleted' | 'attachment_updated' | 'attachment_deleted'
   beforeJson?: string
   afterJson?: string
   createdAt: number
+}
+
+export type Attachment = {
+  id: string
+  itemId: string
+  fileName: string
+  mimeType: string
+  size: number
+  createdAt: number
+  updatedAt: number
+  dataUrl?: string
 }

@@ -1,9 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { HistoryEntry, Item, ItemInput, ItemList } from './types'
+import type { Attachment, HistoryEntry, Item, ItemInput, ItemList } from './types'
 
 const STORAGE_KEY = 'where.v0.3.demo'
 
-type LocalState = { lists: ItemList[]; items: Item[]; history: HistoryEntry[] }
+type LocalState = { lists: ItemList[]; items: Item[]; history: HistoryEntry[]; attachments?: Record<string, Attachment> }
 
 const defaultState: LocalState = {
   lists: [
@@ -93,6 +93,44 @@ export async function deleteItem(id: string): Promise<void> {
 export async function getItemHistory(itemId: string): Promise<HistoryEntry[]> {
   if (isTauri()) return invoke<HistoryEntry[]>('get_item_history', { itemId })
   return readLocal().history.filter((entry) => entry.itemId === itemId)
+}
+
+export async function getItemAttachment(itemId: string): Promise<Attachment | null> {
+  if (isTauri()) return invoke<Attachment | null>('get_item_attachment', { itemId })
+  const state = readLocal()
+  return state.attachments?.[itemId] || null
+}
+
+export async function readItemAttachment(itemId: string): Promise<Uint8Array | null> {
+  if (isTauri()) {
+    const bytes = await invoke<number[] | null>('read_item_attachment', { itemId })
+    return bytes ? Uint8Array.from(bytes) : null
+  }
+  const attachment = await getItemAttachment(itemId)
+  if (!attachment) return null
+  if (!attachment.dataUrl) return null
+  const response = await fetch(attachment.dataUrl)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
+export async function saveItemAttachment(itemId: string, file: File): Promise<Attachment> {
+  if (!file.type.startsWith('image/')) throw new Error('只支持图片文件')
+  if (file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10MB')
+  if (isTauri()) return invoke<Attachment>('save_item_attachment', { itemId, fileName: file.name, mimeType: file.type, bytes: Array.from(new Uint8Array(await file.arrayBuffer())) })
+  const state = readLocal()
+  const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error || new Error('读取图片失败')); reader.readAsDataURL(file) })
+  const attachment: Attachment = { id: crypto.randomUUID(), itemId, fileName: file.name, mimeType: file.type, size: file.size, createdAt: Date.now(), updatedAt: Date.now(), dataUrl }
+  state.attachments = { ...(state.attachments || {}), [itemId]: attachment }
+  writeLocal(state)
+  return attachment
+}
+
+export async function deleteItemAttachment(itemId: string): Promise<void> {
+  if (isTauri()) return invoke('delete_item_attachment', { itemId })
+  const state = readLocal()
+  const attachment = state.attachments?.[itemId]
+  if (state.attachments) delete state.attachments[itemId]
+  writeLocal(state)
 }
 
 export async function createList(name: string, icon?: string): Promise<ItemList> {
