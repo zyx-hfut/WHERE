@@ -2,6 +2,26 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.3.0-items] - 2026-09-08
+
+### Added
+
+- 接入 Rust + rusqlite + SQLite 本地数据库。
+- 启用外键、WAL、事务和基础索引。
+- 初始化“放在”“存有”列表。
+- 实现列表创建、删除和物品数量统计。
+- 实现物品新增、编辑、删除、备注和列表移动。
+- 每次物品写操作自动记录历史快照。
+- 前端通过统一 storage adapter 调用 Tauri commands；浏览器预览使用 localStorage fallback。
+- 增加物品编辑、列表创建、历史查看和错误提示界面。
+
+### Verified
+
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt`
+- `cargo check`
+
 ## [0.2.0-shell] - 2026-09-07
 
 ### Added
