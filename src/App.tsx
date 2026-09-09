@@ -232,20 +232,21 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeId, setActiveId] = useState(() => loadConversations()[0]?.id || '')
   const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [runningIds, setRunningIds] = useState<string[]>([])
   const [error, setError] = useState('')
   const [config, setConfig] = useState<AgentProviderConfig>(() => { try { return { ...defaultConfig, ...JSON.parse(localStorage.getItem('where.agent.preset') || '{}'), apiKey: '' } as AgentProviderConfig } catch { return { ...defaultConfig } } })
   const [showSettings, setShowSettings] = useState(false)
   const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([])
   const active = conversations.find((conversation) => conversation.id === activeId)
+  const busy = runningIds.includes(activeId)
 
   useEffect(() => { if (!conversations.length) { const conversation = createConversation(); setConversations([conversation]); setActiveId(conversation.id); saveConversations([conversation]) } }, [conversations.length])
   useEffect(() => { void getProviderApiKey(config.presetId).then((apiKey) => setConfig((current) => ({ ...current, apiKey }))).catch(() => undefined) }, [config.presetId])
 
   const updateConversations = (updater: (current: Conversation[]) => Conversation[]) => { setConversations((current) => { const next = updater(current); saveConversations(next); return next }) }
-  const patchMessage = (messageId: string, updater: (message: ConversationMessage) => ConversationMessage) => updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((item) => item.id === messageId ? updater(item) : item) } : conversation))
+  const patchMessage = (conversationId: string, messageId: string, updater: (message: ConversationMessage) => ConversationMessage) => updateConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((item) => item.id === messageId ? updater(item) : item) } : conversation))
   const newConversation = () => { const conversation = createConversation(); updateConversations((current) => [conversation, ...current]); setActiveId(conversation.id); setMessage(''); setError('') }
-  const selectConversation = (id: string) => { if (busy) return; setActiveId(id); setMessage(''); setError('') }
+  const selectConversation = (id: string) => { setActiveId(id); setMessage(''); setError('') }
   const toggleConversation = (id: string) => setSelectedConversationIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
   const deleteConversationIds = (ids: string[]) => {
     if (!ids.length) return
@@ -261,28 +262,28 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
 
   const submit = async (event: FormEvent) => {
     event.preventDefault(); if (!message.trim() || busy || !active) return
-    const text = message.trim(); const userId = crypto.randomUUID(); const assistantId = crypto.randomUUID(); const now = Date.now()
+    const conversationId = active.id; const text = message.trim(); const userId = crypto.randomUUID(); const assistantId = crypto.randomUUID(); const now = Date.now()
     const userMessage: ConversationMessage = { id: userId, role: 'user', content: text, createdAt: now, status: 'done' }
     const assistantMessage: ConversationMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now + 1, status: 'streaming', steps: [] }
     updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, title: conversation.messages.length ? conversation.title : titleFromMessage(text), updatedAt: now, messages: [...conversation.messages, userMessage, assistantMessage] } : conversation))
-    setMessage(''); setBusy(true); setError('')
+    setMessage(''); setRunningIds((current) => [...new Set([...current, conversationId])]); setError('')
     try {
-      const context = active.messages.slice(-10).map((item) => `${item.role === 'user' ? '用户' : 'WHERE AI'}：${item.content}`).join('\n')
+      const context = active.messages.slice(-10).map((item) => `${item.role === 'user' ? '用户' : 'WHERE AI'}：${item.content}${item.plan ? `\n结构化计划：${JSON.stringify(item.plan)}` : ''}${item.pendingAction ? `\n待确认操作：${JSON.stringify(item.pendingAction)}` : ''}`).join('\n')
       const answer = await runAgent(text, config, (progress) => {
-        if (progress.type === 'step') patchMessage(assistantId, (item) => ({ ...item, steps: [...(item.steps || []).filter((step) => step.name !== progress.step.name), progress.step] }))
-        else patchMessage(assistantId, (item) => ({ ...item, content: item.content + progress.token, status: 'streaming' }))
+        if (progress.type === 'step') patchMessage(conversationId, assistantId, (item) => ({ ...item, steps: [...(item.steps || []).filter((step) => step.name !== progress.step.name), progress.step] }))
+        else patchMessage(conversationId, assistantId, (item) => ({ ...item, content: item.content + progress.token, status: 'streaming' }))
       }, context)
-      patchMessage(assistantId, (item) => ({ ...item, content: answer.text, status: 'done', steps: answer.steps, pendingAction: answer.pendingAction, plan: answer.plan }))
-    } catch (cause) { const text = cause instanceof Error ? cause.message : '智能体运行失败'; patchMessage(assistantId, (item) => ({ ...item, content: text, status: 'error' })); setError(text) }
-    finally { setBusy(false) }
+      patchMessage(conversationId, assistantId, (item) => ({ ...item, content: answer.text, status: 'done', steps: answer.steps, pendingAction: answer.pendingAction, plan: answer.plan }))
+    } catch (cause) { const errorText = cause instanceof Error ? cause.message : '智能体运行失败'; patchMessage(conversationId, assistantId, (item) => ({ ...item, content: errorText, status: 'error' })); setError(errorText) }
+    finally { setRunningIds((current) => current.filter((id) => id !== conversationId)) }
   }
 
   const confirm = async (messageItem: ConversationMessage) => {
     if (!messageItem.pendingAction) return
-    setBusy(true); setError('')
-    try { const text = await confirmAgentAction(messageItem.pendingAction); patchMessage(messageItem.id, (item) => ({ ...item, content: text, pendingAction: undefined, steps: [...(item.steps || []), { name: '执行本地操作', detail: '事务已提交，历史记录已保存', status: 'done' }, { name: '整理结果', detail: text, status: 'current' }] })) }
+    setRunningIds((current) => [...new Set([...current, activeId])]); setError('')
+    try { const text = await confirmAgentAction(messageItem.pendingAction); patchMessage(activeId, messageItem.id, (item) => ({ ...item, content: text, pendingAction: undefined, steps: [...(item.steps || []), { name: '执行本地操作', detail: '事务已提交，历史记录已保存', status: 'done' }, { name: '整理结果', detail: text, status: 'current' }] })) }
     catch (cause) { setError(cause instanceof Error ? cause.message : '执行操作失败') }
-    finally { setBusy(false) }
+    finally { setRunningIds((current) => current.filter((id) => id !== activeId)) }
   }
 
   return <div className="agent-chat-shell"><aside className="conversation-sidebar"><div className="conversation-sidebar-actions"><button className="new-conversation-button" onClick={newConversation}>＋ 新建对话</button><button className="conversation-delete-button" disabled={!selectedConversationIds.length} onClick={deleteSelectedConversations}>删除选中</button></div><div className="conversation-list">{conversations.sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => <div key={conversation.id} className={conversation.id === activeId ? "active conversation-entry" : "conversation-entry"} onClick={() => selectConversation(conversation.id)}><input type="checkbox" checked={selectedConversationIds.includes(conversation.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleConversation(conversation.id)} /><span className="conversation-copy"><strong>{conversation.title}</strong><small>{conversation.messages.length ? conversation.messages.length + " 条消息" : "空对话"}</small></span><button className="conversation-entry-delete" title="删除对话" onClick={(event) => { event.stopPropagation(); deleteOneConversation(conversation.id) }}>×</button></div>)}</div></aside><section className="agent-chat-main"><header className="topbar"><div><div className="eyebrow">WHERE AI · {config.provider === 'deepseek' ? 'DEEPSEEK' : 'MOCK'}</div><h1>{active?.title || '智能体'}</h1></div><div className="agent-model"><span className="status-dot" />{busy ? '正在处理…' : '已就绪'}<button className="agent-settings-button" onClick={() => setShowSettings(true)}>设置</button></div></header><div className="chat-history">{active?.messages.length ? active.messages.map((item) => <div key={item.id} className={`chat-message ${item.role} ${item.status}`}><div className="chat-role">{item.role === 'user' ? '你' : 'WHERE AI'}</div><div className="chat-bubble">{item.content || (item.status === 'streaming' ? <span className="typing-indicator">正在思考<span>·</span><span>·</span><span>·</span></span> : '')}</div>{item.role === 'assistant' && item.steps?.length ? <div className="message-steps">{item.steps.map((step) => <div key={step.name} className={`message-step ${step.status}`}><span>{step.status === 'done' ? '✓' : '✦'}</span>{step.name}<small>{step.detail}</small></div>)}</div> : null}{item.pendingAction && <div className="inline-action"><strong>需要确认</strong><span>{item.pendingAction.description}</span><button className="primary-button" disabled={busy} onClick={() => void confirm(item)}>确认执行</button></div>}</div>) : <div className="chat-empty"><div className="sparkle">✦</div><h2>你好，我可以帮你管理物品。</h2><p>试试询问位置、记录物品，或修改一个已有位置。</p></div>}</div>{error && <div className="agent-error" role="alert">{error}</div>}<section className="chat-composer conversation-composer"><form onSubmit={submit}><div className="composer-tools"><span className="composer-icon">✦</span><span>{config.name}</span><span className="composer-divider" /><button type="button" onClick={() => setShowSettings(true)}>配置 Provider</button></div><div className="composer-input"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="输入你的问题或操作…" disabled={busy} /><button className="send-button" type="submit" disabled={!message.trim() || busy}>{busy ? '…' : '↑'}</button></div></form><div className="composer-foot">消息会保存在当前账号的本地对话记录中　·　{config.provider === 'mock' ? 'Mock Provider 可无 Key 测试' : 'DeepSeek 使用系统凭据库中的 API Key'}</div></section></section>{showSettings && <AgentProviderSettings config={config} onClose={() => setShowSettings(false)} onSave={saveSettings} />}</div>

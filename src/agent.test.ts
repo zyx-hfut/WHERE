@@ -3,6 +3,9 @@ import { extractJson, mockPlan, mockSynthesis } from './agent'
 
 describe('agent structured planning', () => {
   it('recognizes create, move and note requests in the mock provider', () => {
+    expect(mockPlan('帮我删掉名称中包含钥匙的物品项')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
+    expect(mockPlan('帮我删掉需要用电的物品项')).toMatchObject({ intent: 'delete_items', queryMode: 'semantic_category', category: 'needs_electricity' })
+    expect(mockPlan('这几个都删掉', '用户：帮我删掉名称中包含钥匙的物品项\nWHERE AI：找到 3 个钥匙候选')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
     expect(mockPlan('帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items', items: [{ name: '作业本' }, { name: '学生证' }, { name: '充电宝' }] })
     expect(mockPlan('都添加', '用户：帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items' })
     expect(mockPlan('帮我记录：雨伞放在书柜架子上')).toMatchObject({ intent: 'create_item', name: '雨伞' })
@@ -30,5 +33,20 @@ describe('agent structured planning', () => {
       ],
     }))
     expect(text).toBe('钱包里有：门钥匙、银行卡。')
+  })
+
+  it('includes appliances and power banks in needs-electricity synthesis', () => {
+    const text = mockSynthesis(JSON.stringify({
+      question: '删掉需要用电的物品',
+      plan: { intent: 'delete_items', query: '需要用电', queryMode: 'semantic_category', category: 'needs_electricity' },
+      items: [
+        { id: '1', name: '吹风机', listId: 'placed', listName: '放在', location: '浴室', icon: '✦', updatedAt: 1 },
+        { id: '2', name: '充电宝', listId: 'placed', listName: '放在', location: '床头柜', icon: '✦', updatedAt: 1 },
+        { id: '3', name: '身份证', listId: 'placed', listName: '放在', location: '钱包', icon: '✦', updatedAt: 1 },
+      ],
+    }))
+    expect(text).toContain('吹风机')
+    expect(text).toContain('充电宝')
+    expect(text).not.toContain('身份证')
   })
 })

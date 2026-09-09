@@ -12,16 +12,18 @@ export type AgentProviderConfig = {
   apiKey?: string
 }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
-export type AgentIntent = 'query_items' | 'create_item' | 'create_items' | 'update_item' | 'delete_item' | 'update_note' | 'chat'
+export type AgentIntent = 'query_items' | 'create_item' | 'create_items' | 'update_item' | 'delete_item' | 'delete_items' | 'update_note' | 'chat'
 export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category'
 export type AgentPlan = {
   intent: AgentIntent
   query?: string
   queryMode?: QueryMode
   locationContains?: string
-  category?: 'electronic_device'
+  category?: string
   name?: string
   itemName?: string
+  itemNameContains?: string
+  itemNames?: string[]
   oldLocation?: string
   newLocation?: string
   location?: string
@@ -36,6 +38,7 @@ export type PendingAction = {
   input?: ItemInput
   inputs?: ItemInput[]
   item?: Item
+  items?: Item[]
 }
 export type AgentAnswer = {
   text: string
@@ -80,7 +83,7 @@ export function extractJson(value: string): AgentPlan {
   const end = cleaned.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('模型没有返回结构化 JSON')
   const parsed = JSON.parse(cleaned.slice(start, end + 1)) as AgentPlan
-  const intents: AgentIntent[] = ['query_items', 'create_item', 'create_items', 'update_item', 'delete_item', 'update_note', 'chat']
+  const intents: AgentIntent[] = ['query_items', 'create_item', 'create_items', 'update_item', 'delete_item', 'delete_items', 'update_note', 'chat']
   if (!intents.includes(parsed.intent)) throw new Error('模型返回了不支持的意图')
   return parsed
 }
@@ -95,16 +98,19 @@ export function mockPlan(message: string, context = ''): AgentPlan {
     { triggers: ['我的床头柜里存放了哪些东西', '床头柜里有什么'], plan: { intent: 'query_items', query: '床头柜', queryMode: 'location_contains', locationContains: '床头柜' } },
     { triggers: ['我的钱包里有什么', '钱包里有什么'], plan: { intent: 'query_items', query: '钱包', queryMode: 'location_contains', locationContains: '钱包' } },
     { triggers: ['我的电子设备都放在哪些地方了', '我的电子设备都放在哪里'], plan: { intent: 'query_items', query: '电子设备', queryMode: 'semantic_category', category: 'electronic_device' } },
+    { triggers: ['帮我删掉需要用电的物品项', '删除需要用电的物品'], plan: { intent: 'delete_items', query: '需要用电', queryMode: 'semantic_category', category: 'needs_electricity' } },
     { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
+    { triggers: ['帮我删掉名称中包含钥匙的物品项', '删除名称中包含钥匙的物品'], plan: { intent: 'delete_items', itemNameContains: '钥匙' } },
   ]
   const fixture = fixtures.find((candidate) => candidate.triggers.some((trigger) => input.includes(normalized(trigger))))
   if (fixture) return fixture.plan
+  if ((input.includes('这几个都删掉') || input.includes('都删除')) && context.includes('钥匙')) return { intent: 'delete_items', itemNameContains: '钥匙' }
   if (input === '都添加' && context) { const previous = mockPlan(context); if (previous.intent === 'create_items') return previous }
   return { intent: 'chat', reply: 'Mock Provider 当前只覆盖项目示例场景；切换 DeepSeek Provider 后可处理更开放的自然语言。' }
 }
 
 class MockProvider implements CompletionProvider {
-  async complete(request: CompletionRequest) { return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user, request.context)) }
+  async complete(request: CompletionRequest) { if (request.system.includes('候选筛选器')) return mockSemanticSelection(request.user); return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user, request.context)) }
   async stream(request: CompletionRequest, onToken: (token: string) => void) { const value = await this.complete(request); for (const chunk of value.match(/.{1,4}/gu) || []) { onToken(chunk); await new Promise((resolve) => setTimeout(resolve, 12)) }; return value }
 }
 
@@ -142,10 +148,18 @@ class DeepSeekProvider implements CompletionProvider {
 
 function providerFor(config: AgentProviderConfig): CompletionProvider { return config.provider === 'deepseek' ? new DeepSeekProvider(config) : new MockProvider() }
 
+function mockSemanticSelection(input: string) {
+  const data = JSON.parse(input) as { category?: string; items: Item[] }
+  const names = data.category === 'needs_electricity' ? data.items.filter((item) => /吹风机|充电宝|电脑|手机|相机|耳机|平板|电动车|电器|电子/.test(item.name + item.note)).map((item) => item.name) : data.items.map((item) => item.name)
+  return JSON.stringify({ itemNames: [...new Set(names)] })
+}
+
 export function mockSynthesis(input: string) {
   const data = JSON.parse(input) as { question: string; plan: AgentPlan; items: Item[] }
   const query = data.plan.locationContains || data.plan.query || data.plan.itemName || ''
-  const uniqueItems = [...new Map(data.items.filter((item) => item.name !== query).map((item) => [item.name, item])).values()]
+  let candidates = data.items
+  if (data.plan.category === 'needs_electricity') candidates = candidates.filter((item) => /吹风机|充电宝|电脑|手机|相机|耳机|平板|电动车|电器|电子/.test(item.name + item.note + item.location))
+  const uniqueItems = [...new Map(candidates.filter((item) => item.name !== query).map((item) => [item.name, item])).values()]
   if (!uniqueItems.length) return `没有找到与“${query}”相关的内容。`
   if (data.plan.queryMode === 'location_contains') return `${query}里有：${uniqueItems.map((item) => item.name).join('、')}。`
   if (data.plan.queryMode === 'semantic_category') return `符合“${query}”的物品有：${uniqueItems.map((item) => `${item.name}，在${item.location}`).join('；')}。`
@@ -159,15 +173,15 @@ function agentSystem(capabilities: string, context = '') {
 能力文档：
 ${capabilities}
 
-允许的 intent：query_items、create_item、create_items、update_item、delete_item、update_note、chat。
-JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（当前支持 electronic_device）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
+允许的 intent：query_items、create_item、create_items、update_item、delete_item、delete_items、update_note、chat。
+JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（类别可以是模型根据用户语义命名的自然语言，例如 electronic_device、needs_electricity）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；批量删除使用 delete_items 和 itemNameContains（名称包含筛选）、itemNames（明确名称数组）或 queryMode/category（语义类别筛选）；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
 
 对话上下文（只用于理解当前消息，不要复述）：
 ${context || '无'}`
 }
 
 function synthesisSystem() {
-  return `你是 WHERE 的最终回答整理器。你会收到用户原问题、结构化计划和本地工具返回的物品记录。请用自然、简洁的中文回答，不要逐条机械复述 JSON。\n\n规则：\n- 根据用户问题判断真正需要的信息。\n- 如果问题是“某个位置里有什么”，不要把代表这个容器本身的记录当作里面的物品；例如“钱包 存有 银行卡”不能和“银行卡 放在 钱包”重复计算。\n- 同一物品只回答一次，合并重复记录。\n- “位置包含关系”要包含更具体的位置，例如“床头柜第一个抽屉”属于“床头柜”。\n- 如果没有结果，明确说明没有找到。\n- 只使用工具结果中的事实，不要编造。只返回最终给用户看的文字。`
+  return `你是 WHERE 的最终回答整理器。你会收到用户原问题、结构化计划和本地工具返回的物品记录。请用自然、简洁的中文回答，不要逐条机械复述 JSON。\n\n规则：\n- 根据用户问题判断真正需要的信息。\n- 对 semantic_category 必须逐个判断候选物品是否符合用户描述的类别，不能只依赖固定关键词。例如“需要用电”通常包括吹风机、充电宝、电脑、手机等需要电池或电源才能工作的物品。\n- 如果问题是“某个位置里有什么”，不要把代表这个容器本身的记录当作里面的物品；例如“钱包 存有 银行卡”不能和“银行卡 放在 钱包”重复计算。\n- 同一物品只回答一次，合并重复记录。\n- “位置包含关系”要包含更具体的位置，例如“床头柜第一个抽屉”属于“床头柜”。\n- 如果没有结果，明确说明没有找到。\n- 只使用工具结果中的事实，不要编造。只返回最终给用户看的文字。`
 }
 
 function queryText(plan: AgentPlan, original: string) { return plan.query?.trim() || plan.locationContains?.trim() || plan.itemName?.trim() || original.trim() }
@@ -186,15 +200,21 @@ function summarizeItems(items: Item[], query: string) {
 }
 
 async function resolveQuery(plan: AgentPlan) {
-  if (plan.queryMode === 'semantic_category' && plan.category === 'electronic_device') {
+  if (plan.queryMode === 'semantic_category') {
     const lists = await getLists()
     const all = (await Promise.all(lists.map((list) => getItems(list.id)))).flat()
-    return all.filter((item) => /充电|电脑|手机|相机|耳机|平板|电子|设备|电动车/.test(item.name + item.note + item.location))
+    return all
   }
   return searchItems(plan.locationContains || plan.query || '')
 }
 
-async function buildPendingAction(plan: AgentPlan) {
+async function selectSemanticItems(plan: AgentPlan, candidates: Item[], provider: CompletionProvider) {
+  const raw = await provider.complete({ system: '你是 WHERE 候选筛选器。根据用户语义类别，从给出的物品候选中选择符合条件的物品。只返回 JSON：{"itemNames":["物品名"]}。不要编造候选之外的名称。', user: JSON.stringify({ category: plan.category || plan.query, items: candidates }) })
+  const selected = JSON.parse(raw) as { itemNames?: string[] }
+  return candidates.filter((item) => selected.itemNames?.includes(item.name))
+}
+
+async function buildPendingAction(plan: AgentPlan, provider: CompletionProvider) {
   if (plan.intent === 'create_items') {
     if (!plan.items?.length) return { text: '我理解你想批量记录物品，但没有识别到具体物品。', items: [] as Item[] }
     const lists = await getLists()
@@ -215,6 +235,18 @@ async function buildPendingAction(plan: AgentPlan) {
         input: { listId: list.id, name: plan.name, location: plan.location, note: undefined },
       },
     }
+  }
+  if (plan.intent === 'delete_items') {
+    const query = plan.itemNameContains || plan.query || ''
+    let candidates = query ? (await searchItems(query)).filter((item) => item.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())) : []
+    if (!candidates.length && plan.queryMode === 'semantic_category') candidates = await selectSemanticItems(plan, await resolveQuery(plan), provider)
+    if (!candidates.length && plan.itemNames?.length) {
+      const resolved = await Promise.all(plan.itemNames.map((name) => searchItems(name)))
+      candidates = resolved.flat().filter((item, index, all) => plan.itemNames!.some((name) => item.name === name) && all.findIndex((entry) => entry.id === item.id) === index)
+    }
+    if (!candidates.length) return { text: query ? `没有找到名称包含“${query}”的物品。` : '没有找到可以批量删除的物品。', items: [] as Item[] }
+    const description = query ? `批量删除 ${candidates.length} 个名称包含“${query}”的物品` : `批量删除 ${candidates.length} 个选定物品`
+    return { text: `${query ? `找到 ${candidates.length} 个名称包含“${query}”的物品` : `找到 ${candidates.length} 个选定物品`}：${candidates.map((item) => `${item.name}（${item.location}）`).join('、')}。准备批量删除，请确认。`, items: candidates, action: { type: 'delete_items' as const, description, items: candidates } }
   }
   const resolved = await resolveItem(plan)
   if (!resolved.item) {
@@ -275,7 +307,7 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
     onProgress?.({ type: 'step', step: { name: '整理结果', detail: '模型已根据工具结果去重并生成自然语言回答', status: 'current' } })
     return { text, items, query, plan, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' }, { name: '整理结果', detail: '模型已根据工具结果去重并生成自然语言回答', status: 'current' }] }
   }
-  const pending = await buildPendingAction(plan)
+  const pending = await buildPendingAction(plan, provider)
   return { text: pending.text, items: pending.items, query: queryText(plan, message), plan, pendingAction: pending.action, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `找到 ${pending.items.length} 个候选目标`, status: 'done' }, { name: '等待确认', detail: pending.action ? '变更尚未执行' : '需要补充信息', status: 'current' }] }
 }
 
@@ -283,6 +315,7 @@ export async function confirmAgentAction(action: PendingAction) {
   if (action.type === 'create_items' && action.inputs) for (const input of action.inputs) await createItem(input)
   else if (action.type === 'create_item' && action.input) await createItem(action.input)
   else if ((action.type === 'update_item' || action.type === 'update_note') && action.item && action.input) await updateItem(action.item.id, action.input)
+  else if (action.type === 'delete_items' && action.items) for (const item of action.items) await deleteItem(item.id)
   else if (action.type === 'delete_item' && action.item) await deleteItem(action.item.id)
   else throw new Error('无效的智能体操作')
   window.dispatchEvent(new CustomEvent('where:data-changed'))

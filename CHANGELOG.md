@@ -2,6 +2,25 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.8.4-agent-reliability] - 2026-09-09
+
+### Fixed
+
+- 修复切换/新建会话后，旧会话异步生成结果停止更新或串写到当前会话的问题。
+- 每个智能体任务现在绑定自己的 conversation ID，可并行继续执行。
+- 增加 `delete_items` 语义批量删除计划，支持名称包含、明确名称和语义类别。
+- “需要用电的物品”由模型对本地候选逐个判断，不再只依赖固定电子设备关键词。
+- 增加吹风机、充电宝等语义类别测试样例。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.8.3-search-settings] - 2026-09-09
 
 ### Added
