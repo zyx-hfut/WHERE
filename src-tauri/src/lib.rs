@@ -14,6 +14,29 @@ struct AppState {
     active: Mutex<Option<ActiveAccount>>,
 }
 
+fn active_account_id(state: &State<'_, AppState>) -> Result<String, String> {
+    let active = state
+        .active
+        .lock()
+        .map_err(|_| "账号状态锁定失败".to_string())?;
+    active
+        .as_ref()
+        .map(|account| account.session.account_id.clone())
+        .ok_or_else(|| "请先登录本地账号".to_string())
+}
+
+fn provider_key_entry(
+    state: &State<'_, AppState>,
+    preset_id: &str,
+) -> Result<keyring::Entry, String> {
+    let account_id = active_account_id(state)?;
+    keyring::Entry::new(
+        "dev.where.app.llm",
+        &format!("{}:{}", account_id, preset_id),
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn with_database<T>(
     state: &State<'_, AppState>,
     operation: impl FnOnce(&Database) -> Result<T, String>,
@@ -116,6 +139,44 @@ fn logout_account(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|_| "账号状态锁定失败".to_string())? = None;
     Ok(())
+}
+
+#[tauri::command]
+fn save_provider_api_key(
+    state: State<'_, AppState>,
+    preset_id: String,
+    api_key: String,
+) -> Result<(), String> {
+    let entry = provider_key_entry(&state, &preset_id)?;
+    if api_key.trim().is_empty() {
+        entry.delete_credential().map_err(|error| error.to_string())
+    } else {
+        entry
+            .set_password(api_key.trim())
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
+fn get_provider_api_key(
+    state: State<'_, AppState>,
+    preset_id: String,
+) -> Result<Option<String>, String> {
+    let entry = provider_key_entry(&state, &preset_id)?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+fn delete_provider_api_key(state: State<'_, AppState>, preset_id: String) -> Result<(), String> {
+    let entry = provider_key_entry(&state, &preset_id)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -318,6 +379,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_auth_state,
+            save_provider_api_key,
+            get_provider_api_key,
+            delete_provider_api_key,
             register_account,
             login_account,
             reset_account_password,

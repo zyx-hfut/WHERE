@@ -2,6 +2,26 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.7.2-agent-synthesis] - 2026-09-09
+
+### Fixed
+
+- API Key 预设改为使用 Windows Credential Manager 持久化，切换页面后自动按预设加载。
+- 预设元数据仍只保存名称、Provider、Base URL 和模型，不保存明文 API Key。
+- 查询工具结果现在会再次交给模型进行自然语言总结，而不是由固定模板直接拼接。
+- 对容器查询增加去重规则：不会把“钱包 存有 银行卡”再次当成钱包中的重复物品。
+- 查询结果页面不再同时展示机械化原始记录卡片，避免回答重复。
+- 增加钱包容器去重测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.7.1-agent-rag-plan] - 2026-09-09
 
 ### Changed

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractJson, mockPlan } from './agent'
+import { extractJson, mockPlan, mockSynthesis } from './agent'
 
 describe('agent structured planning', () => {
   it('recognizes create, move and note requests in the mock provider', () => {
@@ -9,10 +9,24 @@ describe('agent structured planning', () => {
     expect(mockPlan('给雨伞添加备注：黑色长柄')).toMatchObject({ intent: 'update_note', itemName: '雨伞', note: '黑色长柄' })
     expect(mockPlan('我的电动车停哪了？')).toMatchObject({ intent: 'query_items', queryMode: 'item_name', query: '电动车' })
     expect(mockPlan('我的床头柜里存放了哪些东西')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '床头柜' })
+    expect(mockPlan('我的钱包里有什么')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '钱包' })
     expect(mockPlan('我的电子设备都放在哪里')).toMatchObject({ intent: 'query_items', queryMode: 'semantic_category', category: 'electronic_device' })
   })
 
   it('rejects unsupported model intents', () => {
     expect(() => extractJson('{"intent":"run_sql"}')).toThrow('不支持的意图')
+  })
+
+  it('summarizes container results without duplicating the container record', () => {
+    const text = mockSynthesis(JSON.stringify({
+      question: '我的钱包里有什么',
+      plan: { intent: 'query_items', query: '钱包', queryMode: 'location_contains', locationContains: '钱包' },
+      items: [
+        { id: '1', name: '门钥匙', listId: 'placed', listName: '放在', location: '钱包', icon: '✦', updatedAt: 1 },
+        { id: '2', name: '钱包', listId: 'stored', listName: '存有', location: '银行卡', icon: '✦', updatedAt: 1 },
+        { id: '3', name: '银行卡', listId: 'placed', listName: '放在', location: '钱包', icon: '✦', updatedAt: 1 },
+      ],
+    }))
+    expect(text).toBe('钱包里有：门钥匙、银行卡。')
   })
 })

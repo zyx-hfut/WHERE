@@ -4,6 +4,7 @@ import capabilityDocument from '../knowledge/agent-capabilities.md?raw'
 
 export type AgentProvider = 'mock' | 'deepseek'
 export type AgentProviderConfig = {
+  presetId: string
   provider: AgentProvider
   name: string
   baseUrl: string
@@ -48,6 +49,7 @@ type CompletionRequest = { system: string; user: string }
 type CompletionProvider = { complete(request: CompletionRequest): Promise<string> }
 
 export const defaultConfig: AgentProviderConfig = {
+  presetId: 'default',
   provider: 'mock',
   name: 'Mock 测试模型',
   baseUrl: 'https://api.deepseek.com',
@@ -87,6 +89,7 @@ export function mockPlan(message: string): AgentPlan {
     { triggers: ['放在科教楼a座和c座之间的电动车现在放在宿舍楼下', '电动车现在放在宿舍楼下'], plan: { intent: 'update_item', itemName: '电动车', oldLocation: '科教楼A座和C座之间', newLocation: '宿舍楼下' } },
     { triggers: ['我的电动车停哪了', '电动车停哪了'], plan: { intent: 'query_items', query: '电动车', queryMode: 'item_name' } },
     { triggers: ['我的床头柜里存放了哪些东西', '床头柜里有什么'], plan: { intent: 'query_items', query: '床头柜', queryMode: 'location_contains', locationContains: '床头柜' } },
+    { triggers: ['我的钱包里有什么', '钱包里有什么'], plan: { intent: 'query_items', query: '钱包', queryMode: 'location_contains', locationContains: '钱包' } },
     { triggers: ['我的电子设备都放在哪些地方了', '我的电子设备都放在哪里'], plan: { intent: 'query_items', query: '电子设备', queryMode: 'semantic_category', category: 'electronic_device' } },
     { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
   ]
@@ -94,7 +97,7 @@ export function mockPlan(message: string): AgentPlan {
 }
 
 class MockProvider implements CompletionProvider {
-  async complete(request: CompletionRequest) { return JSON.stringify(mockPlan(request.user)) }
+  async complete(request: CompletionRequest) { return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user)) }
 }
 
 class DeepSeekProvider implements CompletionProvider {
@@ -117,6 +120,17 @@ class DeepSeekProvider implements CompletionProvider {
 
 function providerFor(config: AgentProviderConfig): CompletionProvider { return config.provider === 'deepseek' ? new DeepSeekProvider(config) : new MockProvider() }
 
+export function mockSynthesis(input: string) {
+  const data = JSON.parse(input) as { question: string; plan: AgentPlan; items: Item[] }
+  const query = data.plan.locationContains || data.plan.query || data.plan.itemName || ''
+  const uniqueItems = [...new Map(data.items.filter((item) => item.name !== query).map((item) => [item.name, item])).values()]
+  if (!uniqueItems.length) return `没有找到与“${query}”相关的内容。`
+  if (data.plan.queryMode === 'location_contains') return `${query}里有：${uniqueItems.map((item) => item.name).join('、')}。`
+  if (data.plan.queryMode === 'semantic_category') return `符合“${query}”的物品有：${uniqueItems.map((item) => `${item.name}，在${item.location}`).join('；')}。`
+  if (uniqueItems.length === 1) return `找到了：${uniqueItems[0].name}，${uniqueItems[0].listName}${uniqueItems[0].location}。`
+  return uniqueItems.map((item) => `${item.name}在${item.location}`).join('；') + '。'
+}
+
 function agentSystem(capabilities: string) {
   return `你是 WHERE 物品位置助手。你只能根据能力文档规划物品查询或物品管理操作。先识别用户意图，严格只返回一个 JSON 对象，不要 Markdown，不要解释。
 
@@ -125,6 +139,10 @@ ${capabilities}
 
 允许的 intent：query_items、create_item、update_item、delete_item、update_note、chat。
 JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（当前支持 electronic_device）；create_item 使用 name、location、listName；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note；chat 使用 reply。不要生成 SQL，不要假设数据库中不存在的 itemId。`
+}
+
+function synthesisSystem() {
+  return `你是 WHERE 的最终回答整理器。你会收到用户原问题、结构化计划和本地工具返回的物品记录。请用自然、简洁的中文回答，不要逐条机械复述 JSON。\n\n规则：\n- 根据用户问题判断真正需要的信息。\n- 如果问题是“某个位置里有什么”，不要把代表这个容器本身的记录当作里面的物品；例如“钱包 存有 银行卡”不能和“银行卡 放在 钱包”重复计算。\n- 同一物品只回答一次，合并重复记录。\n- “位置包含关系”要包含更具体的位置，例如“床头柜第一个抽屉”属于“床头柜”。\n- 如果没有结果，明确说明没有找到。\n- 只使用工具结果中的事实，不要编造。只返回最终给用户看的文字。`
 }
 
 function queryText(plan: AgentPlan, original: string) { return plan.query?.trim() || plan.locationContains?.trim() || plan.itemName?.trim() || original.trim() }
@@ -215,7 +233,8 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
   if (plan.intent === 'query_items') {
     const query = queryText(plan, message)
     const items = await resolveQuery(plan)
-    return { text: summarizeItems(items, query), items, query, plan, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' }, { name: '整理结果', detail: '生成只读回答', status: 'current' }] }
+    const text = await providerFor(config).complete({ system: synthesisSystem(), user: JSON.stringify({ question: message, plan, items }) })
+    return { text, items, query, plan, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' }, { name: '整理结果', detail: '模型已根据工具结果去重并生成自然语言回答', status: 'current' }] }
   }
   const pending = await buildPendingAction(plan)
   return { text: pending.text, items: pending.items, query: queryText(plan, message), plan, pendingAction: pending.action, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `找到 ${pending.items.length} 个候选目标`, status: 'done' }, { name: '等待确认', detail: pending.action ? '变更尚未执行' : '需要补充信息', status: 'current' }] }
