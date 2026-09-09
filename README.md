@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.8.4-agent-reliability` 开发阶段，智能体支持按会话并行执行、语义类别候选筛选和确认式批量删除；同时支持全局搜索、账号设置、本地备份恢复和列表管理。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.8.5-agent-all-items` 开发阶段，智能体支持全量物品查询、按会话并行执行、语义类别候选筛选和确认式批量删除；同时支持全局搜索、账号设置、本地备份恢复和列表管理。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

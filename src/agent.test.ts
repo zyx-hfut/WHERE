@@ -16,6 +16,7 @@ describe('agent structured planning', () => {
     expect(mockPlan('我的床头柜里存放了哪些东西')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '床头柜' })
     expect(mockPlan('我的钱包里有什么')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '钱包' })
     expect(mockPlan('我的电子设备都放在哪里')).toMatchObject({ intent: 'query_items', queryMode: 'semantic_category', category: 'electronic_device' })
+    expect(mockPlan('我目前一共有哪些物品')).toMatchObject({ intent: 'query_items', queryMode: 'all_items' })
   })
 
   it('rejects unsupported model intents', () => {

@@ -2,6 +2,21 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.8.5-agent-all-items] - 2026-09-09
+
+### Fixed
+
+- 修复“我目前一共有哪些物品”等全量查询返回 0 条的问题。
+- 增加 `all_items` 查询模式，模型不再为全量查询生成空关键词。
+- 全量查询会读取当前账号所有列表中的物品，再交给模型自然语言总结。
+- 增加全量查询能力文档和 Mock 计划测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
 ## [0.8.4-agent-reliability] - 2026-09-09
 
 ### Fixed

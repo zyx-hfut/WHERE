@@ -13,7 +13,7 @@ export type AgentProviderConfig = {
 }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
 export type AgentIntent = 'query_items' | 'create_item' | 'create_items' | 'update_item' | 'delete_item' | 'delete_items' | 'update_note' | 'chat'
-export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category'
+export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category' | 'all_items'
 export type AgentPlan = {
   intent: AgentIntent
   query?: string
@@ -98,6 +98,7 @@ export function mockPlan(message: string, context = ''): AgentPlan {
     { triggers: ['我的床头柜里存放了哪些东西', '床头柜里有什么'], plan: { intent: 'query_items', query: '床头柜', queryMode: 'location_contains', locationContains: '床头柜' } },
     { triggers: ['我的钱包里有什么', '钱包里有什么'], plan: { intent: 'query_items', query: '钱包', queryMode: 'location_contains', locationContains: '钱包' } },
     { triggers: ['我的电子设备都放在哪些地方了', '我的电子设备都放在哪里'], plan: { intent: 'query_items', query: '电子设备', queryMode: 'semantic_category', category: 'electronic_device' } },
+    { triggers: ['我目前一共有哪些物品', '我有哪些物品', '列出所有物品', '目前记录了什么', '所有物品有哪些'], plan: { intent: 'query_items', query: '全部物品', queryMode: 'all_items' } },
     { triggers: ['帮我删掉需要用电的物品项', '删除需要用电的物品'], plan: { intent: 'delete_items', query: '需要用电', queryMode: 'semantic_category', category: 'needs_electricity' } },
     { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
     { triggers: ['帮我删掉名称中包含钥匙的物品项', '删除名称中包含钥匙的物品'], plan: { intent: 'delete_items', itemNameContains: '钥匙' } },
@@ -174,7 +175,7 @@ function agentSystem(capabilities: string, context = '') {
 ${capabilities}
 
 允许的 intent：query_items、create_item、create_items、update_item、delete_item、delete_items、update_note、chat。
-JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（类别可以是模型根据用户语义命名的自然语言，例如 electronic_device、needs_electricity）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；批量删除使用 delete_items 和 itemNameContains（名称包含筛选）、itemNames（明确名称数组）或 queryMode/category（语义类别筛选）；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
+JSON 字段规则：query_items 使用 query、queryMode；如果用户询问“有哪些物品”“列出全部记录”等全量问题，必须使用 queryMode: all_items，不要填写空查询词；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（类别可以是模型根据用户语义命名的自然语言，例如 electronic_device、needs_electricity）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；批量删除使用 delete_items 和 itemNameContains（名称包含筛选）、itemNames（明确名称数组）或 queryMode/category（语义类别筛选）；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
 
 对话上下文（只用于理解当前消息，不要复述）：
 ${context || '无'}`
@@ -200,6 +201,10 @@ function summarizeItems(items: Item[], query: string) {
 }
 
 async function resolveQuery(plan: AgentPlan) {
+  if (plan.queryMode === 'all_items') {
+    const lists = await getLists()
+    return (await Promise.all(lists.map((list) => getItems(list.id)))).flat().sort((a, b) => b.updatedAt - a.updatedAt)
+  }
   if (plan.queryMode === 'semantic_category') {
     const lists = await getLists()
     const all = (await Promise.all(lists.map((list) => getItems(list.id)))).flat()
