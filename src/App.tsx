@@ -213,10 +213,11 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
     updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, title: conversation.messages.length ? conversation.title : titleFromMessage(text), updatedAt: now, messages: [...conversation.messages, userMessage, assistantMessage] } : conversation))
     setMessage(''); setBusy(true); setError('')
     try {
+      const context = active.messages.slice(-10).map((item) => `${item.role === 'user' ? '用户' : 'WHERE AI'}：${item.content}`).join('\n')
       const answer = await runAgent(text, config, (progress) => {
         if (progress.type === 'step') patchMessage(assistantId, (item) => ({ ...item, steps: [...(item.steps || []).filter((step) => step.name !== progress.step.name), progress.step] }))
         else patchMessage(assistantId, (item) => ({ ...item, content: item.content + progress.token, status: 'streaming' }))
-      })
+      }, context)
       patchMessage(assistantId, (item) => ({ ...item, content: answer.text, status: 'done', steps: answer.steps, pendingAction: answer.pendingAction, plan: answer.plan }))
     } catch (cause) { const text = cause instanceof Error ? cause.message : '智能体运行失败'; patchMessage(assistantId, (item) => ({ ...item, content: text, status: 'error' })); setError(text) }
     finally { setBusy(false) }

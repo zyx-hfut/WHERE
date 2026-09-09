@@ -2,6 +2,24 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.8.1-agent-context] - 2026-09-09
+
+### Fixed
+
+- 增加 `create_items` 批量新增意图，支持一次添加多个物品。
+- 当前对话最近消息会注入下一轮模型请求，支持“都添加”等省略表达。
+- 能力文档增加批量新增和上下文承接示例。
+- Mock Provider 增加多物品和多轮上下文测试夹具。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.8.0-agent-chat] - 2026-09-09
 
 ### Added

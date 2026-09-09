@@ -12,7 +12,7 @@ export type AgentProviderConfig = {
   apiKey?: string
 }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
-export type AgentIntent = 'query_items' | 'create_item' | 'update_item' | 'delete_item' | 'update_note' | 'chat'
+export type AgentIntent = 'query_items' | 'create_item' | 'create_items' | 'update_item' | 'delete_item' | 'update_note' | 'chat'
 export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category'
 export type AgentPlan = {
   intent: AgentIntent
@@ -27,12 +27,14 @@ export type AgentPlan = {
   location?: string
   listName?: string
   note?: string
+  items?: Array<{ name: string; location: string; listName?: string; note?: string }>
   reply?: string
 }
 export type PendingAction = {
   type: Exclude<AgentIntent, 'query_items' | 'chat'>
   description: string
   input?: ItemInput
+  inputs?: ItemInput[]
   item?: Item
 }
 export type AgentAnswer = {
@@ -45,7 +47,7 @@ export type AgentAnswer = {
   steps: AgentStep[]
 }
 
-type CompletionRequest = { system: string; user: string }
+type CompletionRequest = { system: string; user: string; context?: string }
 export type AgentProgress = { type: 'step'; step: AgentStep } | { type: 'token'; token: string }
 type CompletionProvider = { complete(request: CompletionRequest): Promise<string>; stream?(request: CompletionRequest, onToken: (token: string) => void): Promise<string> }
 
@@ -58,7 +60,7 @@ export const defaultConfig: AgentProviderConfig = {
 }
 
 function unique(values: string[]) { return [...new Set(values.filter(Boolean))] }
-function normalized(value: string) { return value.toLocaleLowerCase().replace(/[\s“”"'？?。！!，,：:；;]/g, '') }
+function normalized(value: string) { return value.toLocaleLowerCase().replace(/[\s“”"'？?。！!，,、：:；;]/g, '') }
 
 function retrieveCapabilities(message: string) {
   const terms = [...normalized(message)]
@@ -78,14 +80,15 @@ export function extractJson(value: string): AgentPlan {
   const end = cleaned.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('模型没有返回结构化 JSON')
   const parsed = JSON.parse(cleaned.slice(start, end + 1)) as AgentPlan
-  const intents: AgentIntent[] = ['query_items', 'create_item', 'update_item', 'delete_item', 'update_note', 'chat']
+  const intents: AgentIntent[] = ['query_items', 'create_item', 'create_items', 'update_item', 'delete_item', 'update_note', 'chat']
   if (!intents.includes(parsed.intent)) throw new Error('模型返回了不支持的意图')
   return parsed
 }
 
-export function mockPlan(message: string): AgentPlan {
+export function mockPlan(message: string, context = ''): AgentPlan {
   const input = normalized(message)
   const fixtures: Array<{ triggers: string[]; plan: AgentPlan }> = [
+    { triggers: ['我的作业本学生证充电宝都在书包里', '作业本学生证充电宝都在书包里'], plan: { intent: 'create_items', items: [{ name: '作业本', location: '书包' }, { name: '学生证', location: '书包' }, { name: '充电宝', location: '书包' }] } },
     { triggers: ['帮我记录雨伞放在书柜的架子上', '记录雨伞放在书柜架子上'], plan: { intent: 'create_item', name: '雨伞', location: '书柜的架子上', listName: '放在' } },
     { triggers: ['放在科教楼a座和c座之间的电动车现在放在宿舍楼下', '电动车现在放在宿舍楼下'], plan: { intent: 'update_item', itemName: '电动车', oldLocation: '科教楼A座和C座之间', newLocation: '宿舍楼下' } },
     { triggers: ['我的电动车停哪了', '电动车停哪了'], plan: { intent: 'query_items', query: '电动车', queryMode: 'item_name' } },
@@ -94,11 +97,14 @@ export function mockPlan(message: string): AgentPlan {
     { triggers: ['我的电子设备都放在哪些地方了', '我的电子设备都放在哪里'], plan: { intent: 'query_items', query: '电子设备', queryMode: 'semantic_category', category: 'electronic_device' } },
     { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
   ]
-  return fixtures.find((candidate) => candidate.triggers.some((trigger) => input.includes(normalized(trigger))))?.plan || { intent: 'chat', reply: 'Mock Provider 当前只覆盖项目示例场景；切换 DeepSeek Provider 后可处理更开放的自然语言。' }
+  const fixture = fixtures.find((candidate) => candidate.triggers.some((trigger) => input.includes(normalized(trigger))))
+  if (fixture) return fixture.plan
+  if (input === '都添加' && context) { const previous = mockPlan(context); if (previous.intent === 'create_items') return previous }
+  return { intent: 'chat', reply: 'Mock Provider 当前只覆盖项目示例场景；切换 DeepSeek Provider 后可处理更开放的自然语言。' }
 }
 
 class MockProvider implements CompletionProvider {
-  async complete(request: CompletionRequest) { return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user)) }
+  async complete(request: CompletionRequest) { return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user, request.context)) }
   async stream(request: CompletionRequest, onToken: (token: string) => void) { const value = await this.complete(request); for (const chunk of value.match(/.{1,4}/gu) || []) { onToken(chunk); await new Promise((resolve) => setTimeout(resolve, 12)) }; return value }
 }
 
@@ -147,14 +153,17 @@ export function mockSynthesis(input: string) {
   return uniqueItems.map((item) => `${item.name}在${item.location}`).join('；') + '。'
 }
 
-function agentSystem(capabilities: string) {
+function agentSystem(capabilities: string, context = '') {
   return `你是 WHERE 物品位置助手。你只能根据能力文档规划物品查询或物品管理操作。先识别用户意图，严格只返回一个 JSON 对象，不要 Markdown，不要解释。
 
 能力文档：
 ${capabilities}
 
-允许的 intent：query_items、create_item、update_item、delete_item、update_note、chat。
-JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（当前支持 electronic_device）；create_item 使用 name、location、listName；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note；chat 使用 reply。不要生成 SQL，不要假设数据库中不存在的 itemId。`
+允许的 intent：query_items、create_item、create_items、update_item、delete_item、update_note、chat。
+JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（当前支持 electronic_device）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
+
+对话上下文（只用于理解当前消息，不要复述）：
+${context || '无'}`
 }
 
 function synthesisSystem() {
@@ -186,6 +195,12 @@ async function resolveQuery(plan: AgentPlan) {
 }
 
 async function buildPendingAction(plan: AgentPlan) {
+  if (plan.intent === 'create_items') {
+    if (!plan.items?.length) return { text: '我理解你想批量记录物品，但没有识别到具体物品。', items: [] as Item[] }
+    const lists = await getLists()
+    const inputs: ItemInput[] = plan.items.flatMap((entry) => { const list = lists.find((itemList) => itemList.name === entry.listName) || lists[0]; return list ? [{ listId: list.id, name: entry.name, location: entry.location, note: entry.note }] : [] })
+    return { text: `准备新增 ${inputs.length} 件物品：${inputs.map((input) => `${input.name}（${input.location}）`).join('、')}。`, items: [], action: { type: 'create_items' as const, description: `批量新增 ${inputs.length} 件物品`, inputs } }
+  }
   if (plan.intent === 'create_item') {
     if (!plan.name || !plan.location) return { text: '我理解你想记录一个物品，但还缺少物品名称或位置。', items: [] as Item[] }
     const lists = await getLists()
@@ -237,7 +252,7 @@ async function buildPendingAction(plan: AgentPlan) {
   }
 }
 
-export async function runAgent(message: string, config: AgentProviderConfig = defaultConfig, onProgress?: (progress: AgentProgress) => void): Promise<AgentAnswer> {
+export async function runAgent(message: string, config: AgentProviderConfig = defaultConfig, onProgress?: (progress: AgentProgress) => void, conversationContext = ''): Promise<AgentAnswer> {
   const capabilities = retrieveCapabilities(message)
   const steps: AgentStep[] = [
     { name: '检索能力文档', detail: capabilities ? '命中 WHERE 物品管理能力' : '未命中能力文档', status: 'done' },
@@ -245,7 +260,7 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
   ]
   onProgress?.({ type: 'step', step: steps[0] })
   const provider = providerFor(config)
-  const plan = extractJson(await provider.complete({ system: agentSystem(capabilities), user: message }))
+  const plan = extractJson(await provider.complete({ system: agentSystem(capabilities, conversationContext), user: message, context: conversationContext }))
   steps[1] = { name: '理解请求', detail: `识别为 ${plan.intent}`, status: 'done' }
   onProgress?.({ type: 'step', step: steps[1] })
   if (plan.intent === 'chat') return { text: plan.reply || '我可以帮助你管理物品位置。', items: [], query: '', plan, provider: config.provider, steps: [...steps, { name: '整理结果', detail: '生成对话回复', status: 'current' }] }
@@ -265,7 +280,8 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
 }
 
 export async function confirmAgentAction(action: PendingAction) {
-  if (action.type === 'create_item' && action.input) await createItem(action.input)
+  if (action.type === 'create_items' && action.inputs) for (const input of action.inputs) await createItem(input)
+  else if (action.type === 'create_item' && action.input) await createItem(action.input)
   else if ((action.type === 'update_item' || action.type === 'update_note') && action.item && action.input) await updateItem(action.item.id, action.input)
   else if (action.type === 'delete_item' && action.item) await deleteItem(action.item.id)
   else throw new Error('无效的智能体操作')

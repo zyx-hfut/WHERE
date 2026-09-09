@@ -3,6 +3,8 @@ import { extractJson, mockPlan, mockSynthesis } from './agent'
 
 describe('agent structured planning', () => {
   it('recognizes create, move and note requests in the mock provider', () => {
+    expect(mockPlan('帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items', items: [{ name: '作业本' }, { name: '学生证' }, { name: '充电宝' }] })
+    expect(mockPlan('都添加', '用户：帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items' })
     expect(mockPlan('帮我记录：雨伞放在书柜架子上')).toMatchObject({ intent: 'create_item', name: '雨伞' })
     expect(mockPlan('帮我记录：雨伞放在书柜架子上').location).toContain('书柜')
     expect(mockPlan('电动车现在放在宿舍楼下')).toMatchObject({ intent: 'update_item', itemName: '电动车', newLocation: '宿舍楼下' })
