@@ -2,6 +2,27 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.7.1-agent-rag-plan] - 2026-09-09
+
+### Changed
+
+- 将查询计划改为由模型输出 `queryMode`：物品名称、位置包含关系或语义类别。
+- 能力文档增加五类示例的字段提取规则。
+- “床头柜里有什么”使用 `location_contains`，可匹配更具体的“床头柜第一个抽屉”。
+- “电子设备都放在哪里”使用 `semantic_category` 和 `electronic_device` 类别。
+- Mock Provider 改为固定示例夹具，不再作为正式意图识别逻辑。
+- DeepSeek Provider 继续使用能力文档和结构化 JSON 计划。
+- 增加五类示例的结构化计划测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.7.0-agent-write] - 2026-09-08
 
 ### Added

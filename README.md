@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.7.0-agent-write` 开发阶段，已接入 SQLite 本地持久化、列表管理、物品 CRUD、备注、历史记录、图片附件、本地账号，以及支持 Mock/DeepSeek Provider 的结构化智能体写操作。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.7.1-agent-rag-plan` 开发阶段，智能体已支持 RAG 能力说明、Provider 结构化意图计划、Mock 无 Key 测试，以及确认后执行写操作。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

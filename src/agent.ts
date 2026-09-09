@@ -12,9 +12,13 @@ export type AgentProviderConfig = {
 }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
 export type AgentIntent = 'query_items' | 'create_item' | 'update_item' | 'delete_item' | 'update_note' | 'chat'
+export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category'
 export type AgentPlan = {
   intent: AgentIntent
   query?: string
+  queryMode?: QueryMode
+  locationContains?: string
+  category?: 'electronic_device'
   name?: string
   itemName?: string
   oldLocation?: string
@@ -77,19 +81,16 @@ export function extractJson(value: string): AgentPlan {
 }
 
 export function mockPlan(message: string): AgentPlan {
-  const clean = message.trim().replace(/[“”"'？?。！!]/g, '')
-  const createMatch = clean.match(/(?:帮我)?(?:记录|添加|新增)[：:]?(.+?)(?:放在|存有)(.+)$/)
-  if (createMatch) return { intent: 'create_item', name: createMatch[1].trim(), location: createMatch[2].trim(), listName: clean.includes('存有') ? '存有' : '放在' }
-  const updateMatch = clean.match(/(.+?)(?:现在|目前)放在(.+?)(?:改|换|搬|放)到(.+)$/)
-  if (updateMatch) return { intent: 'update_item', itemName: updateMatch[1].replace(/我的/g, '').trim(), oldLocation: updateMatch[2].trim(), newLocation: updateMatch[3].trim() }
-  const moveMatch = clean.match(/(.+?)(?:现在|目前)放在(.+)$/)
-  if (moveMatch) return { intent: 'update_item', itemName: moveMatch[1].replace(/我的/g, '').trim(), newLocation: moveMatch[2].trim() }
-  const deleteMatch = clean.match(/(?:删除|移除)(?:物品)?(.+)$/)
-  if (deleteMatch) return { intent: 'delete_item', itemName: deleteMatch[1].trim() }
-  const noteMatch = clean.match(/给(.+?)(?:添加|备注|记下)(?:备注)?[：:]?(.+)$/)
-  if (noteMatch) return { intent: 'update_note', itemName: noteMatch[1].trim(), note: noteMatch[2].trim() }
-  if (/哪|位置|在哪里|在哪|停哪|放在哪|有什么|哪些/.test(clean)) return { intent: 'query_items', query: clean.replace(/^(我的|请问|告诉我)/, '').replace(/(停哪了|在哪里|在哪儿|在哪|有什么|哪些东西|放在哪)$/g, '').trim() }
-  return { intent: 'chat', reply: '我可以帮你查询、记录、修改、删除物品位置，也可以管理备注。当前写操作会先展示预览，确认后才执行。' }
+  const input = normalized(message)
+  const fixtures: Array<{ triggers: string[]; plan: AgentPlan }> = [
+    { triggers: ['帮我记录雨伞放在书柜的架子上', '记录雨伞放在书柜架子上'], plan: { intent: 'create_item', name: '雨伞', location: '书柜的架子上', listName: '放在' } },
+    { triggers: ['放在科教楼a座和c座之间的电动车现在放在宿舍楼下', '电动车现在放在宿舍楼下'], plan: { intent: 'update_item', itemName: '电动车', oldLocation: '科教楼A座和C座之间', newLocation: '宿舍楼下' } },
+    { triggers: ['我的电动车停哪了', '电动车停哪了'], plan: { intent: 'query_items', query: '电动车', queryMode: 'item_name' } },
+    { triggers: ['我的床头柜里存放了哪些东西', '床头柜里有什么'], plan: { intent: 'query_items', query: '床头柜', queryMode: 'location_contains', locationContains: '床头柜' } },
+    { triggers: ['我的电子设备都放在哪些地方了', '我的电子设备都放在哪里'], plan: { intent: 'query_items', query: '电子设备', queryMode: 'semantic_category', category: 'electronic_device' } },
+    { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
+  ]
+  return fixtures.find((candidate) => candidate.triggers.some((trigger) => input.includes(normalized(trigger))))?.plan || { intent: 'chat', reply: 'Mock Provider 当前只覆盖项目示例场景；切换 DeepSeek Provider 后可处理更开放的自然语言。' }
 }
 
 class MockProvider implements CompletionProvider {
@@ -123,10 +124,10 @@ function agentSystem(capabilities: string) {
 ${capabilities}
 
 允许的 intent：query_items、create_item、update_item、delete_item、update_note、chat。
-JSON 字段规则：query_items 使用 query；create_item 使用 name、location、listName；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note；chat 使用 reply。不要生成 SQL，不要假设数据库中不存在的 itemId。`
+JSON 字段规则：query_items 使用 query、queryMode；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（当前支持 electronic_device）；create_item 使用 name、location、listName；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；update_note 使用 itemName、note；chat 使用 reply。不要生成 SQL，不要假设数据库中不存在的 itemId。`
 }
 
-function queryText(plan: AgentPlan, original: string) { return plan.query?.trim() || plan.itemName?.trim() || original.trim() }
+function queryText(plan: AgentPlan, original: string) { return plan.query?.trim() || plan.locationContains?.trim() || plan.itemName?.trim() || original.trim() }
 
 async function resolveItem(plan: AgentPlan) {
   const query = plan.itemName || plan.name || plan.query || ''
@@ -139,6 +140,15 @@ function summarizeItems(items: Item[], query: string) {
   if (!items.length) return `我在本地记录中没有找到与“${query}”相关的物品。`
   if (items.length === 1) { const item = items[0]; return `找到了：${item.name} ${item.listName} ${item.location}${item.note ? `。备注：${item.note}` : ''}` }
   return `找到 ${items.length} 条相关记录：${unique(items.map((item) => `${item.name} ${item.listName} ${item.location}`)).join('；')}。`
+}
+
+async function resolveQuery(plan: AgentPlan) {
+  if (plan.queryMode === 'semantic_category' && plan.category === 'electronic_device') {
+    const lists = await getLists()
+    const all = (await Promise.all(lists.map((list) => getItems(list.id)))).flat()
+    return all.filter((item) => /充电|电脑|手机|相机|耳机|平板|电子|设备|电动车/.test(item.name + item.note + item.location))
+  }
+  return searchItems(plan.locationContains || plan.query || '')
 }
 
 async function buildPendingAction(plan: AgentPlan) {
@@ -204,8 +214,7 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
   if (plan.intent === 'chat') return { text: plan.reply || '我可以帮助你管理物品位置。', items: [], query: '', plan, provider: config.provider, steps: [...steps, { name: '整理结果', detail: '生成对话回复', status: 'current' }] }
   if (plan.intent === 'query_items') {
     const query = queryText(plan, message)
-    let items = await searchItems(query)
-    if (!items.length && /电子设备|电子产品/.test(message)) { const lists = await getLists(); items = (await Promise.all(lists.map((list) => getItems(list.id)))).flat().filter((item) => /电动车|充电|电脑|手机|相机|耳机|平板|电子/.test(item.name + item.note + item.location)) }
+    const items = await resolveQuery(plan)
     return { text: summarizeItems(items, query), items, query, plan, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' }, { name: '整理结果', detail: '生成只读回答', status: 'current' }] }
   }
   const pending = await buildPendingAction(plan)
