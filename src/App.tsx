@@ -5,7 +5,7 @@ import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccoun
 import { confirmAgentAction, defaultConfig, runAgent, runLocalAgent } from './agent'
 import type { AgentAnswer, AgentProviderConfig } from './agent'
 import { getProviderApiKey, saveProviderApiKey } from './provider-secrets'
-import { createConversation, loadConversations, saveConversations, titleFromMessage } from './conversations'
+import { createConversation, deleteConversations, loadConversations, saveConversations, titleFromMessage } from './conversations'
 import type { Conversation, ConversationMessage } from './conversations'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 
@@ -103,11 +103,17 @@ function App() {
     catch (cause) { setError(cause instanceof Error ? cause.message : '创建列表失败') }
   }
 
-  const removeList = async () => {
-    if (lists.length <= 1) { setError('至少需要保留一个列表'); return }
-    if (!window.confirm(`确定删除“${activeListName}”列表吗？`)) return
-    try { await deleteList(activeList); const nextLists = await refreshLists(); setActiveList(nextLists[0]?.id || '') }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '删除列表失败') }
+  const removeLists = async (ids: string[]) => {
+    if (!ids.length) return
+    if (lists.length - ids.length < 1) { setError('至少需要保留一个列表'); return }
+    const selected = lists.filter((list) => ids.includes(list.id))
+    if (selected.some((list) => list.count > 0)) { setError('选中的列表中仍有物品，请先移动或删除这些物品'); return }
+    if (!window.confirm(`确定删除选中的 ${selected.length} 个列表吗？`)) return
+    try {
+      for (const id of ids) await deleteList(id)
+      const nextLists = await refreshLists()
+      if (!nextLists.some((list) => list.id === activeList)) setActiveList(nextLists[0]?.id || '')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '删除列表失败') }
   }
 
   if (authLoading) return <div className="auth-loading"><span className="spinner" />正在检查本地账号…</div>
@@ -124,7 +130,7 @@ function App() {
       <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.7.0 · Agent Write</div></div>
     </aside>
     <main className="main-content">
-      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteList={removeList} />}
+      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} />}
       {page === 'agent' && <AgentConversationPage onNavigateToItems={() => setPage('items')} />}
         {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
     </main>
@@ -140,11 +146,16 @@ function NavButton({ active, icon, label, badge, onClick }: { active: boolean; i
   return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}><span className="icon" aria-hidden="true">{icon}</span><span>{label}</span>{badge && <small>{badge}</small>}</button>
 }
 
-function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteList }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteList: () => void }) {
+function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void }) {
+  const [manage, setManage] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  const exitManage = () => { setManage(false); setSelected([]) }
   return <>
     <header className="topbar"><div><div className="eyebrow">我的物品</div><h1>物品位置</h1></div><div className="topbar-actions"><button className="ghost-button" title="搜索">⌕ <span>搜索</span><kbd>⌘ K</kbd></button><button className="avatar">Z</button></div></header>
     <section className="page-intro"><p>把重要的东西，放在记得住的地方。</p><button className="primary-button" onClick={onAdd}><span>＋</span> 添加物品</button></section>
-    <div className="list-tabs" role="tablist" aria-label="物品列表">{lists.map((list) => <button key={list.id} role="tab" aria-selected={activeList === list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></button>)}<button className="add-list-button" title="新建列表" onClick={onAddList}>＋</button><button className="list-settings-button" title="删除当前列表" onClick={onDeleteList}>•••</button></div>
+    <div className="list-toolbar"><span className="muted">{manage ? `已选择 ${selected.length} 个列表` : '物品列表'}</span><div>{manage ? <><button className="toolbar-button danger" disabled={!selected.length} onClick={() => { onDeleteLists(selected); exitManage() }}>删除选中</button><button className="toolbar-button" onClick={exitManage}>完成</button></> : <button className="toolbar-button" onClick={() => setManage(true)}>管理列表</button>}</div></div>
+    <div className="list-tabs" role="tablist" aria-label="物品列表">{lists.map((list) => manage ? <label key={list.id} className={`list-tab manage-tab ${selected.includes(list.id) ? 'selected' : ''}`}><input type="checkbox" checked={selected.includes(list.id)} onChange={() => toggle(list.id)} /><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></label> : <button key={list.id} role="tab" aria-selected={activeList === list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></button>)}<button className="add-list-button" title="新建列表" onClick={onAddList}>＋</button></div>
     <section className="items-panel"><div className="panel-heading"><div><h2>{activeListName}</h2><span className="muted">按最近更新排序 · 本地数据库</span></div></div>
       {loading ? <div className="loading-state"><span className="spinner" />正在打开本地数据…</div> : items.length ? <div className="item-list">{items.map((item) => <ItemRow key={item.id} item={item} onEdit={onEdit} onDelete={onDelete} onHistory={onHistory} />)}</div> : <EmptyState onAdd={onAdd} />}
     </section>
@@ -194,6 +205,7 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
   const [error, setError] = useState('')
   const [config, setConfig] = useState<AgentProviderConfig>(() => { try { return { ...defaultConfig, ...JSON.parse(localStorage.getItem('where.agent.preset') || '{}'), apiKey: '' } as AgentProviderConfig } catch { return { ...defaultConfig } } })
   const [showSettings, setShowSettings] = useState(false)
+  const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([])
   const active = conversations.find((conversation) => conversation.id === activeId)
 
   useEffect(() => { if (!conversations.length) { const conversation = createConversation(); setConversations([conversation]); setActiveId(conversation.id); saveConversations([conversation]) } }, [conversations.length])
@@ -203,6 +215,17 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
   const patchMessage = (messageId: string, updater: (message: ConversationMessage) => ConversationMessage) => updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((item) => item.id === messageId ? updater(item) : item) } : conversation))
   const newConversation = () => { const conversation = createConversation(); updateConversations((current) => [conversation, ...current]); setActiveId(conversation.id); setMessage(''); setError('') }
   const selectConversation = (id: string) => { if (busy) return; setActiveId(id); setMessage(''); setError('') }
+  const toggleConversation = (id: string) => setSelectedConversationIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
+  const deleteConversationIds = (ids: string[]) => {
+    if (!ids.length) return
+    if (!window.confirm(`确定删除选中的 ${ids.length} 个对话吗？此操作不可撤销。`)) return
+    const next = deleteConversations(ids)
+    setConversations(next)
+    if (ids.includes(activeId)) setActiveId(next[0]?.id || '')
+    setSelectedConversationIds([])
+  }
+  const deleteSelectedConversations = () => deleteConversationIds(selectedConversationIds)
+  const deleteOneConversation = (id: string) => deleteConversationIds([id])
   const saveSettings = async (next: AgentProviderConfig) => { const { apiKey, ...persisted } = next; localStorage.setItem('where.agent.preset', JSON.stringify(persisted)); await saveProviderApiKey(next.presetId, apiKey || ''); setConfig(next); setShowSettings(false) }
 
   const submit = async (event: FormEvent) => {
@@ -231,7 +254,7 @@ function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () =>
     finally { setBusy(false) }
   }
 
-  return <div className="agent-chat-shell"><aside className="conversation-sidebar"><button className="new-conversation-button" onClick={newConversation}>＋ 新建对话</button><div className="conversation-list">{conversations.sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => <button key={conversation.id} className={`conversation-entry ${conversation.id === activeId ? 'active' : ''}`} onClick={() => selectConversation(conversation.id)}><strong>{conversation.title}</strong><small>{conversation.messages.length ? `${conversation.messages.length} 条消息` : '空对话'}</small></button>)}</div></aside><section className="agent-chat-main"><header className="topbar"><div><div className="eyebrow">WHERE AI · {config.provider === 'deepseek' ? 'DEEPSEEK' : 'MOCK'}</div><h1>{active?.title || '智能体'}</h1></div><div className="agent-model"><span className="status-dot" />{busy ? '正在处理…' : '已就绪'}<button className="agent-settings-button" onClick={() => setShowSettings(true)}>设置</button></div></header><div className="chat-history">{active?.messages.length ? active.messages.map((item) => <div key={item.id} className={`chat-message ${item.role} ${item.status}`}><div className="chat-role">{item.role === 'user' ? '你' : 'WHERE AI'}</div><div className="chat-bubble">{item.content || (item.status === 'streaming' ? <span className="typing-indicator">正在思考<span>·</span><span>·</span><span>·</span></span> : '')}</div>{item.role === 'assistant' && item.steps?.length ? <div className="message-steps">{item.steps.map((step) => <div key={step.name} className={`message-step ${step.status}`}><span>{step.status === 'done' ? '✓' : '✦'}</span>{step.name}<small>{step.detail}</small></div>)}</div> : null}{item.pendingAction && <div className="inline-action"><strong>需要确认</strong><span>{item.pendingAction.description}</span><button className="primary-button" disabled={busy} onClick={() => void confirm(item)}>确认执行</button></div>}</div>) : <div className="chat-empty"><div className="sparkle">✦</div><h2>你好，我可以帮你管理物品。</h2><p>试试询问位置、记录物品，或修改一个已有位置。</p></div>}</div>{error && <div className="agent-error" role="alert">{error}</div>}<section className="chat-composer conversation-composer"><form onSubmit={submit}><div className="composer-tools"><span className="composer-icon">✦</span><span>{config.name}</span><span className="composer-divider" /><button type="button" onClick={() => setShowSettings(true)}>配置 Provider</button></div><div className="composer-input"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="输入你的问题或操作…" disabled={busy} /><button className="send-button" type="submit" disabled={!message.trim() || busy}>{busy ? '…' : '↑'}</button></div></form><div className="composer-foot">消息会保存在当前账号的本地对话记录中　·　{config.provider === 'mock' ? 'Mock Provider 可无 Key 测试' : 'DeepSeek 使用系统凭据库中的 API Key'}</div></section></section>{showSettings && <AgentProviderSettings config={config} onClose={() => setShowSettings(false)} onSave={saveSettings} />}</div>
+  return <div className="agent-chat-shell"><aside className="conversation-sidebar"><div className="conversation-sidebar-actions"><button className="new-conversation-button" onClick={newConversation}>＋ 新建对话</button><button className="conversation-delete-button" disabled={!selectedConversationIds.length} onClick={deleteSelectedConversations}>删除选中</button></div><div className="conversation-list">{conversations.sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => <div key={conversation.id} className={conversation.id === activeId ? "active conversation-entry" : "conversation-entry"} onClick={() => selectConversation(conversation.id)}><input type="checkbox" checked={selectedConversationIds.includes(conversation.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleConversation(conversation.id)} /><span className="conversation-copy"><strong>{conversation.title}</strong><small>{conversation.messages.length ? conversation.messages.length + " 条消息" : "空对话"}</small></span><button className="conversation-entry-delete" title="删除对话" onClick={(event) => { event.stopPropagation(); deleteOneConversation(conversation.id) }}>×</button></div>)}</div></aside><section className="agent-chat-main"><header className="topbar"><div><div className="eyebrow">WHERE AI · {config.provider === 'deepseek' ? 'DEEPSEEK' : 'MOCK'}</div><h1>{active?.title || '智能体'}</h1></div><div className="agent-model"><span className="status-dot" />{busy ? '正在处理…' : '已就绪'}<button className="agent-settings-button" onClick={() => setShowSettings(true)}>设置</button></div></header><div className="chat-history">{active?.messages.length ? active.messages.map((item) => <div key={item.id} className={`chat-message ${item.role} ${item.status}`}><div className="chat-role">{item.role === 'user' ? '你' : 'WHERE AI'}</div><div className="chat-bubble">{item.content || (item.status === 'streaming' ? <span className="typing-indicator">正在思考<span>·</span><span>·</span><span>·</span></span> : '')}</div>{item.role === 'assistant' && item.steps?.length ? <div className="message-steps">{item.steps.map((step) => <div key={step.name} className={`message-step ${step.status}`}><span>{step.status === 'done' ? '✓' : '✦'}</span>{step.name}<small>{step.detail}</small></div>)}</div> : null}{item.pendingAction && <div className="inline-action"><strong>需要确认</strong><span>{item.pendingAction.description}</span><button className="primary-button" disabled={busy} onClick={() => void confirm(item)}>确认执行</button></div>}</div>) : <div className="chat-empty"><div className="sparkle">✦</div><h2>你好，我可以帮你管理物品。</h2><p>试试询问位置、记录物品，或修改一个已有位置。</p></div>}</div>{error && <div className="agent-error" role="alert">{error}</div>}<section className="chat-composer conversation-composer"><form onSubmit={submit}><div className="composer-tools"><span className="composer-icon">✦</span><span>{config.name}</span><span className="composer-divider" /><button type="button" onClick={() => setShowSettings(true)}>配置 Provider</button></div><div className="composer-input"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="输入你的问题或操作…" disabled={busy} /><button className="send-button" type="submit" disabled={!message.trim() || busy}>{busy ? '…' : '↑'}</button></div></form><div className="composer-foot">消息会保存在当前账号的本地对话记录中　·　{config.provider === 'mock' ? 'Mock Provider 可无 Key 测试' : 'DeepSeek 使用系统凭据库中的 API Key'}</div></section></section>{showSettings && <AgentProviderSettings config={config} onClose={() => setShowSettings(false)} onSave={saveSettings} />}</div>
 }
 
 function AgentWritePage({ onNavigateToItems }: { onNavigateToItems: () => void }) {

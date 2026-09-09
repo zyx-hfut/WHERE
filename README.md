@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.8.1-agent-context` 开发阶段，智能体已支持本地对话历史、继续对话、多物品批量计划、上下文承接、工作流进度更新和 DeepSeek 流式回答。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.8.2-management` 开发阶段，智能体支持本地对话历史、继续对话、流式回答和删除管理；物品列表支持单独或批量删除空列表。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

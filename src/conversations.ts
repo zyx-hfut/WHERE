@@ -28,6 +28,13 @@ export function loadConversations(): Conversation[] {
 
 export function saveConversations(conversations: Conversation[]) { localStorage.setItem(storageKey(), JSON.stringify(conversations)) }
 
+export function deleteConversations(ids: string[]) {
+  const remove = new Set(ids)
+  const next = loadConversations().filter((conversation) => !remove.has(conversation.id))
+  saveConversations(next)
+  return next
+}
+
 export function createConversation(): Conversation {
   const now = Date.now()
   return { id: crypto.randomUUID(), title: '新对话', createdAt: now, updatedAt: now, messages: [] }
