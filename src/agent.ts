@@ -46,7 +46,8 @@ export type AgentAnswer = {
 }
 
 type CompletionRequest = { system: string; user: string }
-type CompletionProvider = { complete(request: CompletionRequest): Promise<string> }
+export type AgentProgress = { type: 'step'; step: AgentStep } | { type: 'token'; token: string }
+type CompletionProvider = { complete(request: CompletionRequest): Promise<string>; stream?(request: CompletionRequest, onToken: (token: string) => void): Promise<string> }
 
 export const defaultConfig: AgentProviderConfig = {
   presetId: 'default',
@@ -98,6 +99,7 @@ export function mockPlan(message: string): AgentPlan {
 
 class MockProvider implements CompletionProvider {
   async complete(request: CompletionRequest) { return request.system.includes('最终回答整理器') ? mockSynthesis(request.user) : JSON.stringify(mockPlan(request.user)) }
+  async stream(request: CompletionRequest, onToken: (token: string) => void) { const value = await this.complete(request); for (const chunk of value.match(/.{1,4}/gu) || []) { onToken(chunk); await new Promise((resolve) => setTimeout(resolve, 12)) }; return value }
 }
 
 class DeepSeekProvider implements CompletionProvider {
@@ -115,6 +117,20 @@ class DeepSeekProvider implements CompletionProvider {
     const content = payload.choices?.[0]?.message?.content
     if (!content) throw new Error('模型没有返回内容')
     return content
+  }
+
+  async stream(request: CompletionRequest, onToken: (token: string) => void) {
+    if (!this.config.apiKey) throw new Error('DeepSeek API Key 未配置')
+    const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` }, body: JSON.stringify({ model: this.config.model, temperature: 0.2, stream: true, messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }] }) })
+    if (!response.ok) throw new Error(`模型请求失败：HTTP ${response.status}`)
+    if (!response.body) return this.complete(request)
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let full = ''
+    while (true) {
+      const { value, done } = await reader.read(); buffer += decoder.decode(value || new Uint8Array(), { stream: !done }); const lines = buffer.split('\n'); buffer = lines.pop() || ''
+      for (const line of lines) { if (!line.startsWith('data:')) continue; const payload = line.slice(5).trim(); if (!payload || payload === '[DONE]') continue; const json = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }> }; const token = json.choices?.[0]?.delta?.content || ''; if (token) { full += token; onToken(token) } }
+      if (done) break
+    }
+    return full
   }
 }
 
@@ -221,19 +237,27 @@ async function buildPendingAction(plan: AgentPlan) {
   }
 }
 
-export async function runAgent(message: string, config: AgentProviderConfig = defaultConfig): Promise<AgentAnswer> {
+export async function runAgent(message: string, config: AgentProviderConfig = defaultConfig, onProgress?: (progress: AgentProgress) => void): Promise<AgentAnswer> {
   const capabilities = retrieveCapabilities(message)
   const steps: AgentStep[] = [
     { name: '检索能力文档', detail: capabilities ? '命中 WHERE 物品管理能力' : '未命中能力文档', status: 'done' },
     { name: '理解请求', detail: `使用${config.provider === 'deepseek' ? ' DeepSeek' : ' Mock'} Provider 生成结构化意图`, status: 'current' },
   ]
-  const plan = extractJson(await providerFor(config).complete({ system: agentSystem(capabilities), user: message }))
+  onProgress?.({ type: 'step', step: steps[0] })
+  const provider = providerFor(config)
+  const plan = extractJson(await provider.complete({ system: agentSystem(capabilities), user: message }))
   steps[1] = { name: '理解请求', detail: `识别为 ${plan.intent}`, status: 'done' }
+  onProgress?.({ type: 'step', step: steps[1] })
   if (plan.intent === 'chat') return { text: plan.reply || '我可以帮助你管理物品位置。', items: [], query: '', plan, provider: config.provider, steps: [...steps, { name: '整理结果', detail: '生成对话回复', status: 'current' }] }
   if (plan.intent === 'query_items') {
     const query = queryText(plan, message)
     const items = await resolveQuery(plan)
-    const text = await providerFor(config).complete({ system: synthesisSystem(), user: JSON.stringify({ question: message, plan, items }) })
+    onProgress?.({ type: 'step', step: { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' } })
+    let text = ''
+    const request = { system: synthesisSystem(), user: JSON.stringify({ question: message, plan, items }) }
+    if (provider.stream) text = await provider.stream(request, (token) => onProgress?.({ type: 'token', token }))
+    else text = await provider.complete(request)
+    onProgress?.({ type: 'step', step: { name: '整理结果', detail: '模型已根据工具结果去重并生成自然语言回答', status: 'current' } })
     return { text, items, query, plan, provider: config.provider, steps: [...steps, { name: '检索本地数据', detail: `匹配 ${items.length} 条记录`, status: 'done' }, { name: '整理结果', detail: '模型已根据工具结果去重并生成自然语言回答', status: 'current' }] }
   }
   const pending = await buildPendingAction(plan)

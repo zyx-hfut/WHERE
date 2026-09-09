@@ -2,6 +2,27 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.8.0-agent-chat] - 2026-09-09
+
+### Added
+
+- 增加本地智能体对话会话和历史列表。
+- 支持新建对话、切换历史对话和继续当前对话。
+- 发送消息后立即显示用户消息和助手生成中状态。
+- 工作流步骤在助手消息下实时更新。
+- DeepSeek 最终回答支持 SSE 流式输出。
+- Mock Provider 支持逐段模拟输出，便于无 API Key 测试流畅体验。
+- 支持对话消息状态保存，包括完成、生成中和错误状态。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.7.2-agent-synthesis] - 2026-09-09
 
 ### Fixed

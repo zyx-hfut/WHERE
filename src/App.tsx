@@ -5,6 +5,8 @@ import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccoun
 import { confirmAgentAction, defaultConfig, runAgent, runLocalAgent } from './agent'
 import type { AgentAnswer, AgentProviderConfig } from './agent'
 import { getProviderApiKey, saveProviderApiKey } from './provider-secrets'
+import { createConversation, loadConversations, saveConversations, titleFromMessage } from './conversations'
+import type { Conversation, ConversationMessage } from './conversations'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
@@ -123,7 +125,7 @@ function App() {
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteList={removeList} />}
-      {page === 'agent' && <AgentWritePage onNavigateToItems={() => setPage('items')} />}
+      {page === 'agent' && <AgentConversationPage onNavigateToItems={() => setPage('items')} />}
         {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
     </main>
     {error && <div className="toast" role="alert"><span>!</span>{error}<button onClick={() => setError('')}>×</button></div>}
@@ -183,6 +185,53 @@ function ListComposer({ onClose, onSave }: { onClose: () => void; onSave: (name:
 function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}>{children}</div></div> }
 
 function HistoryModal({ item, history, onClose }: { item: Item; history: HistoryEntry[]; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">变更审计</div><h2>{item.name}的历史</h2></div><button className="close-button" onClick={onClose}>×</button></div>{history.length ? <div className="history-list">{history.map((entry) => <div className="history-entry" key={entry.id}><span className="history-dot" /><div><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small>{entry.action === 'updated' && entry.beforeJson && entry.afterJson && <p>{JSON.parse(entry.beforeJson).location}　→　{JSON.parse(entry.afterJson).location}</p>}</div></div>)}</div> : <div className="history-empty">暂无历史记录</div>}</Modal> }
+
+function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () => void }) {
+  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
+  const [activeId, setActiveId] = useState(() => loadConversations()[0]?.id || '')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [config, setConfig] = useState<AgentProviderConfig>(() => { try { return { ...defaultConfig, ...JSON.parse(localStorage.getItem('where.agent.preset') || '{}'), apiKey: '' } as AgentProviderConfig } catch { return { ...defaultConfig } } })
+  const [showSettings, setShowSettings] = useState(false)
+  const active = conversations.find((conversation) => conversation.id === activeId)
+
+  useEffect(() => { if (!conversations.length) { const conversation = createConversation(); setConversations([conversation]); setActiveId(conversation.id); saveConversations([conversation]) } }, [conversations.length])
+  useEffect(() => { void getProviderApiKey(config.presetId).then((apiKey) => setConfig((current) => ({ ...current, apiKey }))).catch(() => undefined) }, [config.presetId])
+
+  const updateConversations = (updater: (current: Conversation[]) => Conversation[]) => { setConversations((current) => { const next = updater(current); saveConversations(next); return next }) }
+  const patchMessage = (messageId: string, updater: (message: ConversationMessage) => ConversationMessage) => updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((item) => item.id === messageId ? updater(item) : item) } : conversation))
+  const newConversation = () => { const conversation = createConversation(); updateConversations((current) => [conversation, ...current]); setActiveId(conversation.id); setMessage(''); setError('') }
+  const selectConversation = (id: string) => { if (busy) return; setActiveId(id); setMessage(''); setError('') }
+  const saveSettings = async (next: AgentProviderConfig) => { const { apiKey, ...persisted } = next; localStorage.setItem('where.agent.preset', JSON.stringify(persisted)); await saveProviderApiKey(next.presetId, apiKey || ''); setConfig(next); setShowSettings(false) }
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); if (!message.trim() || busy || !active) return
+    const text = message.trim(); const userId = crypto.randomUUID(); const assistantId = crypto.randomUUID(); const now = Date.now()
+    const userMessage: ConversationMessage = { id: userId, role: 'user', content: text, createdAt: now, status: 'done' }
+    const assistantMessage: ConversationMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now + 1, status: 'streaming', steps: [] }
+    updateConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, title: conversation.messages.length ? conversation.title : titleFromMessage(text), updatedAt: now, messages: [...conversation.messages, userMessage, assistantMessage] } : conversation))
+    setMessage(''); setBusy(true); setError('')
+    try {
+      const answer = await runAgent(text, config, (progress) => {
+        if (progress.type === 'step') patchMessage(assistantId, (item) => ({ ...item, steps: [...(item.steps || []).filter((step) => step.name !== progress.step.name), progress.step] }))
+        else patchMessage(assistantId, (item) => ({ ...item, content: item.content + progress.token, status: 'streaming' }))
+      })
+      patchMessage(assistantId, (item) => ({ ...item, content: answer.text, status: 'done', steps: answer.steps, pendingAction: answer.pendingAction, plan: answer.plan }))
+    } catch (cause) { const text = cause instanceof Error ? cause.message : '智能体运行失败'; patchMessage(assistantId, (item) => ({ ...item, content: text, status: 'error' })); setError(text) }
+    finally { setBusy(false) }
+  }
+
+  const confirm = async (messageItem: ConversationMessage) => {
+    if (!messageItem.pendingAction) return
+    setBusy(true); setError('')
+    try { const text = await confirmAgentAction(messageItem.pendingAction); patchMessage(messageItem.id, (item) => ({ ...item, content: text, pendingAction: undefined, steps: [...(item.steps || []), { name: '执行本地操作', detail: '事务已提交，历史记录已保存', status: 'done' }, { name: '整理结果', detail: text, status: 'current' }] })) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '执行操作失败') }
+    finally { setBusy(false) }
+  }
+
+  return <div className="agent-chat-shell"><aside className="conversation-sidebar"><button className="new-conversation-button" onClick={newConversation}>＋ 新建对话</button><div className="conversation-list">{conversations.sort((a, b) => b.updatedAt - a.updatedAt).map((conversation) => <button key={conversation.id} className={`conversation-entry ${conversation.id === activeId ? 'active' : ''}`} onClick={() => selectConversation(conversation.id)}><strong>{conversation.title}</strong><small>{conversation.messages.length ? `${conversation.messages.length} 条消息` : '空对话'}</small></button>)}</div></aside><section className="agent-chat-main"><header className="topbar"><div><div className="eyebrow">WHERE AI · {config.provider === 'deepseek' ? 'DEEPSEEK' : 'MOCK'}</div><h1>{active?.title || '智能体'}</h1></div><div className="agent-model"><span className="status-dot" />{busy ? '正在处理…' : '已就绪'}<button className="agent-settings-button" onClick={() => setShowSettings(true)}>设置</button></div></header><div className="chat-history">{active?.messages.length ? active.messages.map((item) => <div key={item.id} className={`chat-message ${item.role} ${item.status}`}><div className="chat-role">{item.role === 'user' ? '你' : 'WHERE AI'}</div><div className="chat-bubble">{item.content || (item.status === 'streaming' ? <span className="typing-indicator">正在思考<span>·</span><span>·</span><span>·</span></span> : '')}</div>{item.role === 'assistant' && item.steps?.length ? <div className="message-steps">{item.steps.map((step) => <div key={step.name} className={`message-step ${step.status}`}><span>{step.status === 'done' ? '✓' : '✦'}</span>{step.name}<small>{step.detail}</small></div>)}</div> : null}{item.pendingAction && <div className="inline-action"><strong>需要确认</strong><span>{item.pendingAction.description}</span><button className="primary-button" disabled={busy} onClick={() => void confirm(item)}>确认执行</button></div>}</div>) : <div className="chat-empty"><div className="sparkle">✦</div><h2>你好，我可以帮你管理物品。</h2><p>试试询问位置、记录物品，或修改一个已有位置。</p></div>}</div>{error && <div className="agent-error" role="alert">{error}</div>}<section className="chat-composer conversation-composer"><form onSubmit={submit}><div className="composer-tools"><span className="composer-icon">✦</span><span>{config.name}</span><span className="composer-divider" /><button type="button" onClick={() => setShowSettings(true)}>配置 Provider</button></div><div className="composer-input"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="输入你的问题或操作…" disabled={busy} /><button className="send-button" type="submit" disabled={!message.trim() || busy}>{busy ? '…' : '↑'}</button></div></form><div className="composer-foot">消息会保存在当前账号的本地对话记录中　·　{config.provider === 'mock' ? 'Mock Provider 可无 Key 测试' : 'DeepSeek 使用系统凭据库中的 API Key'}</div></section></section>{showSettings && <AgentProviderSettings config={config} onClose={() => setShowSettings(false)} onSave={saveSettings} />}</div>
+}
 
 function AgentWritePage({ onNavigateToItems }: { onNavigateToItems: () => void }) {
   const [message, setMessage] = useState('')
