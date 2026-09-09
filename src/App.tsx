@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, getItemAttachment, getItemHistory, getItems, getLists, readItemAttachment, saveItemAttachment, updateItem } from './storage'
+import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, exportLocalData, getItemAttachment, getItemHistory, getItems, getLists, importLocalData, readItemAttachment, saveItemAttachment, searchItems, updateItem } from './storage'
 import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccountPassword } from './auth'
 import { confirmAgentAction, defaultConfig, runAgent, runLocalAgent } from './agent'
 import type { AgentAnswer, AgentProviderConfig } from './agent'
@@ -33,6 +33,9 @@ function App() {
   const [authenticated, setAuthenticated] = useState(false)
   const [username, setUsername] = useState('')
   const [recoveryKey, setRecoveryKey] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+  const [profileModal, setProfileModal] = useState<'sync' | 'help' | 'about' | null>(null)
+  const [showGlobalHistory, setShowGlobalHistory] = useState(false)
   const [error, setError] = useState('')
 
   const refreshLists = async (preferredId?: string) => {
@@ -116,6 +119,13 @@ function App() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '删除列表失败') }
   }
 
+  const navigateToItem = (item: Item) => { setActiveList(item.listId); setPage('items'); setShowSearch(false) }
+  const exportBackup = async () => {
+    try { const content = await exportLocalData(); const blob = new Blob([content], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `where-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '导出备份失败') }
+  }
+  const importBackup = async (file: File) => { try { await importLocalData(await file.text()); await refreshLists(); setItems(await getItems(activeList)); setError('备份已恢复') } catch (cause) { setError(cause instanceof Error ? cause.message : '恢复备份失败') } }
+
   if (authLoading) return <div className="auth-loading"><span className="spinner" />正在检查本地账号…</div>
   if (!authenticated) return <AuthPage onLogin={handleLogin} onRegister={handleRegister} onResetPassword={handleResetPassword} error={error} />
   return <div className={`app-shell ${theme === 'dark' ? 'theme-dark' : ''}`}>
@@ -130,15 +140,18 @@ function App() {
       <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.7.0 · Agent Write</div></div>
     </aside>
     <main className="main-content">
-      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} />}
+      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} />}
       {page === 'agent' && <AgentConversationPage onNavigateToItems={() => setPage('items')} />}
-        {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} />}
+        {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} onSync={() => setProfileModal('sync')} onHelp={() => setProfileModal('help')} onAbout={() => setProfileModal('about')} onHistory={() => setShowGlobalHistory(true)} onExport={exportBackup} onImport={importBackup} />}
     </main>
     {error && <div className="toast" role="alert"><span>!</span>{error}<button onClick={() => setError('')}>×</button></div>}
     {composer && <ItemComposer lists={lists} activeList={activeList} state={composer} onClose={() => setComposer(null)} onSave={saveItem} />}
     {showListComposer && <ListComposer onClose={() => setShowListComposer(false)} onSave={saveList} />}
     {historyItem && <HistoryModal item={historyItem} history={history} onClose={() => setHistoryItem(null)} />}
     {recoveryKey && <RecoveryModal recoveryKey={recoveryKey} onClose={() => setRecoveryKey('')} />}
+    {showSearch && <SearchModal onClose={() => setShowSearch(false)} onSelect={navigateToItem} />}
+    {profileModal && <InfoModal type={profileModal} onClose={() => setProfileModal(null)} />}
+    {showGlobalHistory && <GlobalHistoryModal onClose={() => setShowGlobalHistory(false)} />}
   </div>
 }
 
@@ -146,13 +159,13 @@ function NavButton({ active, icon, label, badge, onClick }: { active: boolean; i
   return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}><span className="icon" aria-hidden="true">{icon}</span><span>{label}</span>{badge && <small>{badge}</small>}</button>
 }
 
-function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void }) {
+function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists, onSearch }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void; onSearch: () => void }) {
   const [manage, setManage] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
   const exitManage = () => { setManage(false); setSelected([]) }
   return <>
-    <header className="topbar"><div><div className="eyebrow">我的物品</div><h1>物品位置</h1></div><div className="topbar-actions"><button className="ghost-button" title="搜索">⌕ <span>搜索</span><kbd>⌘ K</kbd></button><button className="avatar">Z</button></div></header>
+    <header className="topbar"><div><div className="eyebrow">我的物品</div><h1>物品位置</h1></div><div className="topbar-actions"><button className="ghost-button" title="搜索" onClick={onSearch}>⌕ <span>搜索</span><kbd>⌘ K</kbd></button><button className="avatar">Z</button></div></header>
     <section className="page-intro"><p>把重要的东西，放在记得住的地方。</p><button className="primary-button" onClick={onAdd}><span>＋</span> 添加物品</button></section>
     <div className="list-toolbar"><span className="muted">{manage ? `已选择 ${selected.length} 个列表` : '物品列表'}</span><div>{manage ? <><button className="toolbar-button danger" disabled={!selected.length} onClick={() => { onDeleteLists(selected); exitManage() }}>删除选中</button><button className="toolbar-button" onClick={exitManage}>完成</button></> : <button className="toolbar-button" onClick={() => setManage(true)}>管理列表</button>}</div></div>
     <div className="list-tabs" role="tablist" aria-label="物品列表">{lists.map((list) => manage ? <label key={list.id} className={`list-tab manage-tab ${selected.includes(list.id) ? 'selected' : ''}`}><input type="checkbox" checked={selected.includes(list.id)} onChange={() => toggle(list.id)} /><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></label> : <button key={list.id} role="tab" aria-selected={activeList === list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></button>)}<button className="add-list-button" title="新建列表" onClick={onAddList}>＋</button></div>
@@ -196,6 +209,24 @@ function ListComposer({ onClose, onSave }: { onClose: () => void; onSave: (name:
 function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}>{children}</div></div> }
 
 function HistoryModal({ item, history, onClose }: { item: Item; history: HistoryEntry[]; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">变更审计</div><h2>{item.name}的历史</h2></div><button className="close-button" onClick={onClose}>×</button></div>{history.length ? <div className="history-list">{history.map((entry) => <div className="history-entry" key={entry.id}><span className="history-dot" /><div><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small>{entry.action === 'updated' && entry.beforeJson && entry.afterJson && <p>{JSON.parse(entry.beforeJson).location}　→　{JSON.parse(entry.afterJson).location}</p>}</div></div>)}</div> : <div className="history-empty">暂无历史记录</div>}</Modal> }
+
+function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (item: Item) => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Item[]>([])
+  useEffect(() => { if (!query.trim()) { setResults([]); return }; const timer = window.setTimeout(() => void searchItems(query).then(setResults), 180); return () => window.clearTimeout(timer) }, [query])
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">全局搜索</div><h2>搜索物品</h2></div><button className="close-button" onClick={onClose}>×</button></div><input className="search-modal-input" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、位置或备注" />{query && <div className="search-results">{results.length ? results.map((item) => <button key={item.id} onClick={() => onSelect(item)}><strong>{item.name}</strong><span>{item.listName} {item.location}</span>{item.note && <small>{item.note}</small>}</button>) : <div className="history-empty">没有找到相关物品</div>}</div>}<p className="modal-note">支持搜索物品名称、位置和备注。</p></Modal>
+}
+
+function GlobalHistoryModal({ onClose }: { onClose: () => void }) {
+  const [entries, setEntries] = useState<HistoryEntry[]>([])
+  useEffect(() => { void getLists().then(async (lists) => { const items = (await Promise.all(lists.map((list) => getItems(list.id)))).flat(); const all = (await Promise.all(items.map((item) => getItemHistory(item.id)))).flat(); setEntries(all.sort((a, b) => b.createdAt - a.createdAt)) }) }, [])
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">全局审计</div><h2>历史记录</h2></div><button className="close-button" onClick={onClose}>×</button></div>{entries.length ? <div className="history-list">{entries.map((entry) => <div className="history-entry" key={`${entry.itemId}-${entry.id}`}><span className="history-dot" /><div><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small></div></div>)}</div> : <div className="history-empty">暂无历史记录</div>}</Modal>
+}
+
+function InfoModal({ type, onClose }: { type: 'sync' | 'help' | 'about'; onClose: () => void }) {
+  const content = type === 'sync' ? { title: '设备同步', eyebrow: 'SYNC', text: '同步协议正在规划中。当前版本的数据保存在本机账号数据库，尚未启用 PC 与手机之间的传输。' } : type === 'help' ? { title: '使用说明', eyebrow: 'HELP', text: '在物品页面添加名称和位置；智能体页面可以查询或规划操作；所有写操作都会先展示预览并等待确认。' } : { title: '关于 WHERE', eyebrow: 'ABOUT', text: 'WHERE 是一个开源、本地优先的物品位置记录工具。当前版本支持 SQLite、账号、图片、RAG 智能体和确认式写操作。' }
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">{content.eyebrow}</div><h2>{content.title}</h2></div><button className="close-button" onClick={onClose}>×</button></div><p className="info-modal-text">{content.text}</p><button className="primary-button" onClick={onClose}>知道了</button></Modal>
+}
 
 function AgentConversationPage({ onNavigateToItems }: { onNavigateToItems: () => void }) {
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
@@ -318,8 +349,8 @@ function AuthPage({ onLogin, onRegister, onResetPassword, error }: { onLogin: (u
 
 function RecoveryModal({ recoveryKey, onClose }: { recoveryKey: string; onClose: () => void }) { return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">请立即保存</div><h2>你的恢复密钥</h2></div><button className="close-button" onClick={onClose}>×</button></div><p className="recovery-warning">这是恢复账号的唯一凭据，关闭后 WHERE 不会再次显示。请把它保存在安全的位置。</p><div className="recovery-key">{recoveryKey}</div><div className="modal-actions"><button className="primary-button" onClick={() => void navigator.clipboard?.writeText(recoveryKey)}>复制密钥</button><button className="outline-button" onClick={onClose}>我已保存</button></div></Modal> }
 
-function ProfilePage({ username, theme, setTheme, onLogout }: { username: string; theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onLogout: () => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">{username.slice(0, 1).toUpperCase()}</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">{username.slice(0, 1).toUpperCase()}</div><div><h2>{username}</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button" onClick={onLogout}>退出登录</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="在 PC 和手机之间安全同步" arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入本地数据" arrow /><SettingRow icon="▤" title="历史记录" description="查看所有数据变更" arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.7.0 · MIT License" arrow /></div></section></> }
+function ProfilePage({ username, theme, setTheme, onLogout, onSync, onHelp, onAbout, onHistory, onExport, onImport }: { username: string; theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onLogout: () => void; onSync: () => void; onHelp: () => void; onAbout: () => void; onHistory: () => void; onExport: () => void; onImport: (file: File) => void }) { return <><header className="topbar"><div><div className="eyebrow">设置与账户</div><h1>我的</h1></div><button className="avatar large">{username.slice(0, 1).toUpperCase()}</button></header><section className="profile-content"><div className="profile-card"><div className="profile-avatar">{username.slice(0, 1).toUpperCase()}</div><div><h2>{username}</h2><p>本地账号　·　数据只保存在此设备</p></div><button className="outline-button" onClick={onLogout}>退出登录</button></div><div className="settings-section"><div className="section-label">外观</div><div className="setting-row"><div><strong>主题</strong><span>选择 WHERE 的显示风格</span></div><div className="theme-switcher"><button className={theme === 'light' ? 'selected' : ''} onClick={() => setTheme('light')}>☼ 明亮</button><button className={theme === 'dark' ? 'selected' : ''} onClick={() => setTheme('dark')}>◐ 夜间</button></div></div></div><div className="settings-section"><div className="section-label">数据与安全</div><SettingRow icon="⌁" title="设备同步" description="当前版本尚未启用设备同步" onClick={onSync} arrow /><SettingRow icon="↥" title="备份与恢复" description="导出或导入当前本地数据" onClick={onExport} arrow /><label className="setting-row setting-button"><span className="setting-icon">↥</span><span className="setting-copy"><strong>导入备份</strong><span>选择 JSON 备份文件恢复</span></span><input className="hidden-file-input" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.currentTarget.value = '' }} /></label><SettingRow icon="▤" title="历史记录" description="查看当前账号的物品变更" onClick={onHistory} arrow /></div><div className="settings-section"><div className="section-label">帮助</div><SettingRow icon="?" title="使用说明" description="了解 WHERE 的基本用法" onClick={onHelp} arrow /><SettingRow icon="i" title="关于 WHERE" description="版本 0.8.2 · MIT License" onClick={onAbout} arrow /></div></section></> }
 
-function SettingRow({ icon, title, description, arrow }: { icon: string; title: string; description: string; arrow?: boolean }) { return <button className="setting-row setting-button"><span className="setting-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><span>{description}</span></span>{arrow && <span className="setting-arrow">›</span>}</button> }
+function SettingRow({ icon, title, description, arrow, onClick }: { icon: string; title: string; description: string; arrow?: boolean; onClick?: () => void }) { return <button className="setting-row setting-button" onClick={onClick}><span className="setting-icon">{icon}</span><span className="setting-copy"><strong>{title}</strong><span>{description}</span></span>{arrow && <span className="setting-arrow">›</span>}</button> }
 
 export default App

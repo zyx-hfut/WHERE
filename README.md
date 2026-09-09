@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.8.2-management` 开发阶段，智能体支持本地对话历史、继续对话、流式回答和删除管理；物品列表支持单独或批量删除空列表。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.8.3-search-settings` 开发阶段，已接入全局物品搜索、账号设置入口、历史查看、帮助/关于、本地备份恢复和主题设置。智能体与列表管理能力也已具备。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

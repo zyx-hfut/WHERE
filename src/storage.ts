@@ -55,6 +55,17 @@ export async function searchItems(query: string): Promise<Item[]> {
   return state.items.filter((item) => [item.name, item.location, item.note || ''].some((value) => value.toLocaleLowerCase().includes(normalized))).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+export async function exportLocalData(): Promise<string> {
+  if (isTauri()) throw new Error('桌面端备份导出将在同步模块中接入系统文件选择器')
+  return JSON.stringify(readLocal(), null, 2)
+}
+
+export async function importLocalData(serialized: string): Promise<void> {
+  const parsed = JSON.parse(serialized) as LocalState
+  if (!Array.isArray(parsed.lists) || !Array.isArray(parsed.items) || !Array.isArray(parsed.history)) throw new Error('备份文件格式不正确')
+  writeLocal(parsed)
+}
+
 export function resetDemoData() {
   localStorage.removeItem(getStorageKey())
 }
