@@ -2,6 +2,29 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.9.0-agent-planner] - 2026-09-10
+
+### Added
+
+- 增加 `multi_step` 复合任务计划和 `tasks` 子任务数组。
+- 支持按位置筛选多个物品并批量移动。
+- 支持一条消息中同时执行移动、删除和新增等不同操作。
+- 增加“任务分解与规划”“逐步检索与校验”工作流步骤展示。
+- 所有子任务校验通过后统一生成确认预览。
+- 支持 `delete_item` 的名称与位置联合定位。
+- 复合任务执行后复用现有 SQLite 写入和历史记录链路。
+- 能力文档增加复合请求拆解示例。
+- 增加复合任务 Mock 计划测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.8.5-agent-all-items] - 2026-09-09
 
 ### Fixed

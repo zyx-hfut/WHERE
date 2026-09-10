@@ -12,7 +12,8 @@ export type AgentProviderConfig = {
   apiKey?: string
 }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
-export type AgentIntent = 'query_items' | 'create_item' | 'create_items' | 'update_item' | 'delete_item' | 'delete_items' | 'update_note' | 'chat'
+export type AgentTaskIntent = 'create_item' | 'create_items' | 'update_item' | 'move_items_by_location' | 'delete_item' | 'delete_items' | 'update_note'
+export type AgentIntent = 'query_items' | AgentTaskIntent | 'multi_step' | 'chat'
 export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category' | 'all_items'
 export type AgentPlan = {
   intent: AgentIntent
@@ -30,15 +31,18 @@ export type AgentPlan = {
   listName?: string
   note?: string
   items?: Array<{ name: string; location: string; listName?: string; note?: string }>
+  tasks?: AgentTask[]
   reply?: string
 }
+export type AgentTask = { intent: AgentTaskIntent; taskId?: string; name?: string; itemName?: string; itemNameContains?: string; itemNames?: string[]; oldLocation?: string; newLocation?: string; location?: string; locationContains?: string; listName?: string; note?: string; items?: Array<{ name: string; location: string; listName?: string; note?: string }> }
 export type PendingAction = {
-  type: Exclude<AgentIntent, 'query_items' | 'chat'>
+  type: AgentTaskIntent | 'batch'
   description: string
   input?: ItemInput
   inputs?: ItemInput[]
   item?: Item
   items?: Item[]
+  actions?: PendingAction[]
 }
 export type AgentAnswer = {
   text: string
@@ -83,8 +87,9 @@ export function extractJson(value: string): AgentPlan {
   const end = cleaned.lastIndexOf('}')
   if (start < 0 || end <= start) throw new Error('模型没有返回结构化 JSON')
   const parsed = JSON.parse(cleaned.slice(start, end + 1)) as AgentPlan
-  const intents: AgentIntent[] = ['query_items', 'create_item', 'create_items', 'update_item', 'delete_item', 'delete_items', 'update_note', 'chat']
+  const intents: AgentIntent[] = ['query_items', 'create_item', 'create_items', 'update_item', 'move_items_by_location', 'delete_item', 'delete_items', 'update_note', 'multi_step', 'chat']
   if (!intents.includes(parsed.intent)) throw new Error('模型返回了不支持的意图')
+  if (parsed.intent === 'multi_step' && (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0)) throw new Error('模型返回的任务计划为空')
   return parsed
 }
 
@@ -102,6 +107,7 @@ export function mockPlan(message: string, context = ''): AgentPlan {
     { triggers: ['帮我删掉需要用电的物品项', '删除需要用电的物品'], plan: { intent: 'delete_items', query: '需要用电', queryMode: 'semantic_category', category: 'needs_electricity' } },
     { triggers: ['给雨伞添加备注黑色长柄', '给雨伞备注黑色长柄'], plan: { intent: 'update_note', itemName: '雨伞', note: '黑色长柄' } },
     { triggers: ['帮我删掉名称中包含钥匙的物品项', '删除名称中包含钥匙的物品'], plan: { intent: 'delete_items', itemNameContains: '钥匙' } },
+    { triggers: ['把第二个抽屉里的东西都放到床头的储物箱中删除钱包里的银行卡便携手电筒放在钱包里'], plan: { intent: 'multi_step', tasks: [{ taskId: 'move-drawer', intent: 'move_items_by_location', locationContains: '第二个抽屉', newLocation: '床头的储物箱中' }, { taskId: 'delete-card', intent: 'delete_item', itemName: '银行卡', locationContains: '钱包' }, { taskId: 'add-flashlight', intent: 'create_item', name: '便携手电筒', location: '钱包', listName: '放在' }] } },
   ]
   const fixture = fixtures.find((candidate) => candidate.triggers.some((trigger) => input.includes(normalized(trigger))))
   if (fixture) return fixture.plan
@@ -175,7 +181,7 @@ function agentSystem(capabilities: string, context = '') {
 ${capabilities}
 
 允许的 intent：query_items、create_item、create_items、update_item、delete_item、delete_items、update_note、chat。
-JSON 字段规则：query_items 使用 query、queryMode；如果用户询问“有哪些物品”“列出全部记录”等全量问题，必须使用 queryMode: all_items，不要填写空查询词；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（类别可以是模型根据用户语义命名的自然语言，例如 electronic_device、needs_electricity）；create_item 使用 name、location、listName；批量新增使用 create_items 和 items 数组，每个元素包含 name、location、listName（可选）、note（可选）；update_item 使用 itemName、oldLocation（可选）、newLocation；delete_item 使用 itemName；批量删除使用 delete_items 和 itemNameContains（名称包含筛选）、itemNames（明确名称数组）或 queryMode/category（语义类别筛选）；update_note 使用 itemName、note。不要生成 SQL，不要假设数据库中不存在的 itemId。
+JSON 字段规则：query_items 使用 query、queryMode；如果用户询问“有哪些物品”“列出全部记录”等全量问题，必须使用 queryMode: all_items，不要填写空查询词；当 queryMode 为 location_contains 时填写 locationContains；当 queryMode 为 semantic_category 时填写 category（类别可以是模型根据用户语义命名的自然语言）；复杂请求必须使用 intent: multi_step 和 tasks 数组，严格按用户表达拆分成多个独立任务，不要把多个操作压缩成一个任务。任务可使用 create_item（name、location、listName）、create_items（items）、update_item（itemName、oldLocation、newLocation）、move_items_by_location（locationContains、newLocation）、delete_item（itemName、locationContains 可选）、delete_items（itemNameContains、itemNames 或 queryMode/category）、update_note（itemName、note）。不要生成 SQL，不要假设数据库中不存在的 itemId。每个任务都必须保留用户原意，任务之间按用户语序排列。
 
 对话上下文（只用于理解当前消息，不要复述）：
 ${context || '无'}`
@@ -191,6 +197,7 @@ async function resolveItem(plan: AgentPlan) {
   const query = plan.itemName || plan.name || plan.query || ''
   let candidates = await searchItems(query)
   if (plan.oldLocation) candidates = candidates.filter((item) => normalized(item.location).includes(normalized(plan.oldLocation!)))
+  if (plan.locationContains) candidates = candidates.filter((item) => normalized(item.location).includes(normalized(plan.locationContains!)))
   return { item: candidates.length === 1 ? candidates[0] : undefined, candidates }
 }
 
@@ -289,6 +296,30 @@ async function buildPendingAction(plan: AgentPlan, provider: CompletionProvider)
   }
 }
 
+async function buildMultiStepAction(plan: AgentPlan, provider: CompletionProvider) {
+  const tasks = plan.tasks || []
+  const actions: PendingAction[] = []
+  const affectedItems: Item[] = []
+  const summaries: string[] = []
+  for (const [index, task] of tasks.entries()) {
+    if (task.intent === 'move_items_by_location') {
+      const location = task.locationContains || task.location || ''
+      const candidates = (await searchItems(location)).filter((item) => normalized(item.location).includes(normalized(location)))
+      if (!candidates.length) { summaries.push(`步骤 ${index + 1}：没有找到位置包含“${location}”的物品`); continue }
+      affectedItems.push(...candidates)
+      for (const item of candidates) actions.push({ type: 'update_item', description: `将“${item.name}”移动到“${task.newLocation || ''}”`, item, input: { listId: item.listId, name: item.name, location: task.newLocation || item.location, note: item.note, icon: item.icon } })
+      summaries.push(`步骤 ${index + 1}：找到 ${candidates.length} 件物品，将移动到“${task.newLocation || ''}”`)
+      continue
+    }
+    const result = await buildPendingAction({ ...task, intent: task.intent } as AgentPlan, provider)
+    summaries.push(`步骤 ${index + 1}：${result.text}`)
+    affectedItems.push(...result.items)
+    if (result.action) actions.push(result.action)
+  }
+  if (!actions.length) return { text: summaries.join('\n'), items: affectedItems }
+  return { text: `已分解为 ${tasks.length} 个子任务：\n${summaries.join('\n')}\n\n以上操作尚未执行，请确认。`, items: affectedItems, action: { type: 'batch' as const, description: `按计划执行 ${actions.length} 个本地操作`, actions } }
+}
+
 export async function runAgent(message: string, config: AgentProviderConfig = defaultConfig, onProgress?: (progress: AgentProgress) => void, conversationContext = ''): Promise<AgentAnswer> {
   const capabilities = retrieveCapabilities(message)
   const steps: AgentStep[] = [
@@ -301,6 +332,14 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
   steps[1] = { name: '理解请求', detail: `识别为 ${plan.intent}`, status: 'done' }
   onProgress?.({ type: 'step', step: steps[1] })
   if (plan.intent === 'chat') return { text: plan.reply || '我可以帮助你管理物品位置。', items: [], query: '', plan, provider: config.provider, steps: [...steps, { name: '整理结果', detail: '生成对话回复', status: 'current' }] }
+  if (plan.intent === 'multi_step') {
+    const planningStep = { name: '任务分解与规划', detail: `识别出 ${plan.tasks?.length || 0} 个有序子任务`, status: 'done' as const }
+    onProgress?.({ type: 'step', step: planningStep })
+    const pending = await buildMultiStepAction(plan, provider)
+    const checkStep = { name: '逐步检索与校验', detail: `已生成 ${pending.action?.actions?.length || 0} 个待执行操作`, status: 'done' as const }
+    onProgress?.({ type: 'step', step: checkStep })
+    return { text: pending.text, items: pending.items, query: '', plan, pendingAction: pending.action, provider: config.provider, steps: [...steps, planningStep, checkStep, { name: pending.action ? '等待确认' : '整理结果', detail: pending.action ? '所有子任务将在确认后执行' : '部分任务需要补充信息', status: 'current' }] }
+  }
   if (plan.intent === 'query_items') {
     const query = queryText(plan, message)
     const items = await resolveQuery(plan)
@@ -317,7 +356,8 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
 }
 
 export async function confirmAgentAction(action: PendingAction) {
-  if (action.type === 'create_items' && action.inputs) for (const input of action.inputs) await createItem(input)
+  if (action.type === 'batch' && action.actions) for (const child of action.actions) await confirmAgentAction(child)
+  else if (action.type === 'create_items' && action.inputs) for (const input of action.inputs) await createItem(input)
   else if (action.type === 'create_item' && action.input) await createItem(action.input)
   else if ((action.type === 'update_item' || action.type === 'update_note') && action.item && action.input) await updateItem(action.item.id, action.input)
   else if (action.type === 'delete_items' && action.items) for (const item of action.items) await deleteItem(item.id)

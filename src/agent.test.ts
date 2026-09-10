@@ -3,6 +3,7 @@ import { extractJson, mockPlan, mockSynthesis } from './agent'
 
 describe('agent structured planning', () => {
   it('recognizes create, move and note requests in the mock provider', () => {
+    expect(mockPlan('把第二个抽屉里的东西都放到床头的储物箱中，删除钱包里的银行卡，便携手电筒放在钱包里')).toMatchObject({ intent: 'multi_step', tasks: [{ intent: 'move_items_by_location' }, { intent: 'delete_item' }, { intent: 'create_item' }] })
     expect(mockPlan('帮我删掉名称中包含钥匙的物品项')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
     expect(mockPlan('帮我删掉需要用电的物品项')).toMatchObject({ intent: 'delete_items', queryMode: 'semantic_category', category: 'needs_electricity' })
     expect(mockPlan('这几个都删掉', '用户：帮我删掉名称中包含钥匙的物品项\nWHERE AI：找到 3 个钥匙候选')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
