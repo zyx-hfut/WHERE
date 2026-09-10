@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.11.0-agent-vector-search` 开发阶段，名称、位置和备注检索使用轻量字符 n-gram 向量余弦相似度；语义类别仍由 LLM 对候选物品进行判断。智能体通过通用工具注册表和可组合计划完成复合任务。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.11.1-action-preview` 开发阶段，智能体支持通用工具组合、向量检索、复合计划和逐条原子操作预览；语义类别仍由 LLM 对候选物品进行判断。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

@@ -18,6 +18,7 @@ export const TOOL_DEFINITIONS: Array<{ name: ToolName; description: string; read
 export type PlanStep = { id: string; tool: ToolName; purpose: string; args?: Record<string, unknown>; forEach?: string }
 export type AgentPlan = { goal: string; steps: PlanStep[]; intent?: string; query?: string; queryMode?: QueryMode; category?: string; itemName?: string; name?: string; location?: string; listName?: string; reply?: string }
 export type PendingAction = { type: 'create_item' | 'update_item' | 'delete_item' | 'batch'; description: string; input?: ItemInput; item?: Item; actions?: PendingAction[] }
+export type AtomicActionPreview = { operation: '新增' | '修改' | '删除'; subject: string; before?: string; after?: string; detail: string }
 export type AgentAnswer = { text: string; items: Item[]; query: string; plan: AgentPlan; pendingAction?: PendingAction; provider: AgentProvider; steps: AgentStep[] }
 export type AgentProgress = { type: 'step'; step: AgentStep } | { type: 'token'; token: string }
 
@@ -26,6 +27,14 @@ type CompletionProvider = { complete(request: CompletionRequest): Promise<string
 type ToolObservation = { items?: Item[]; lists?: Awaited<ReturnType<typeof getLists>> }
 
 export const defaultConfig: AgentProviderConfig = { presetId: 'default', provider: 'mock', name: 'Mock 测试模型', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' }
+
+export function describePendingAction(action: PendingAction): AtomicActionPreview[] {
+  if (action.type === 'batch') return (action.actions || []).flatMap(describePendingAction)
+  if (action.type === 'create_item' && action.input) return [{ operation: '新增', subject: action.input.name, after: action.input.location, detail: `新增“${action.input.name}”，位置：${action.input.location}` }]
+  if (action.type === 'update_item' && action.item && action.input) return [{ operation: '修改', subject: action.item.name, before: action.item.location, after: action.input.location, detail: `将“${action.item.name}”从“${action.item.location}”移动到“${action.input.location}”` }]
+  if (action.type === 'delete_item' && action.item) return [{ operation: '删除', subject: action.item.name, before: action.item.location, detail: `删除“${action.item.name}”（当前位置：${action.item.location}）` }]
+  return [{ operation: '修改', subject: action.description, detail: action.description }]
+}
 function unique(values: string[]) { return [...new Set(values.filter(Boolean))] }
 function normalized(value: string) { return value.toLocaleLowerCase().replace(/[\s“”"'？?。！!，,、：:；;]/g, '') }
 
