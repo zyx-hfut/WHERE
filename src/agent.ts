@@ -1,6 +1,7 @@
 import { createItem, deleteItem, getItems, getLists, searchItems, updateItem } from './storage'
 import type { Item, ItemInput } from './types'
 import capabilityDocument from '../knowledge/agent-capabilities.md?raw'
+import { rankByCosine } from './vector-match'
 
 export type AgentProvider = 'mock' | 'deepseek'
 export type AgentProviderConfig = { presetId: string; provider: AgentProvider; name: string; baseUrl: string; model: string; apiKey?: string }
@@ -27,8 +28,6 @@ type ToolObservation = { items?: Item[]; lists?: Awaited<ReturnType<typeof getLi
 export const defaultConfig: AgentProviderConfig = { presetId: 'default', provider: 'mock', name: 'Mock 测试模型', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' }
 function unique(values: string[]) { return [...new Set(values.filter(Boolean))] }
 function normalized(value: string) { return value.toLocaleLowerCase().replace(/[\s“”"'？?。！!，,、：:；;]/g, '') }
-export function normalizedSearchText(value: string) { return normalized(value).replace(/[的个]/g, '') }
-function matchesSearchText(value: string, query: string) { const actual = normalizedSearchText(value); const expected = normalizedSearchText(query); return Boolean(expected) && (actual === expected || actual.includes(expected)) }
 
 function retrieveCapabilities(message: string) {
   const terms = [...normalized(message)]
@@ -95,7 +94,11 @@ async function runTool(step: PlanStep, observations: Map<string, ToolObservation
     const nameContains = String(args.name_contains || args.nameContains || '')
     const locationContains = String(args.location_contains || args.locationContains || '')
     const noteContains = String(args.note_contains || args.noteContains || '')
-    let items = args.scope === 'all' ? all : all.filter((item) => (!name || matchesSearchText(item.name, name)) && (!nameContains || matchesSearchText(item.name, nameContains)) && (!locationContains || matchesSearchText(item.location, locationContains)) && (!noteContains || matchesSearchText(item.note || '', noteContains)))
+    let items = args.scope === 'all' ? all : all
+    if (name) items = rankByCosine(name, items, (item) => item.name, 0.62).map(({ value }) => value)
+    if (nameContains) items = rankByCosine(nameContains, items, (item) => item.name, 0.24).map(({ value }) => value)
+    if (locationContains) items = rankByCosine(locationContains, items, (item) => item.location, 0.28).map(({ value }) => value)
+    if (noteContains) items = rankByCosine(noteContains, items, (item) => item.note || '', 0.24).map(({ value }) => value)
     if (args.semantic_query) { const raw = await provider.complete({ system: '你是语义筛选器。根据用户类别从候选中选择符合项，只返回 JSON：{"itemNames":["..."]}。不得编造。', user: JSON.stringify({ category: args.semantic_query, items: all }) }); const selected = JSON.parse(raw) as { itemNames?: string[] }; items = all.filter((item) => selected.itemNames?.includes(item.name)) }
     return { items }
   }

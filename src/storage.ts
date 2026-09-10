@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { Attachment, HistoryEntry, Item, ItemInput, ItemList } from './types'
 import { getCurrentAccountId } from './auth'
+import { rankByCosine } from './vector-match'
 
 const LEGACY_STORAGE_KEY = 'where.v0.3.demo'
 
@@ -50,9 +51,9 @@ export async function getItems(listId: string): Promise<Item[]> {
 export async function searchItems(query: string): Promise<Item[]> {
   if (isTauri()) return invoke<Item[]>('search_items', { query })
   const state = readLocal()
-  const normalized = query.trim().toLocaleLowerCase()
-  if (!normalized) return []
-  return state.items.filter((item) => [item.name, item.location, item.note || ''].some((value) => value.toLocaleLowerCase().includes(normalized))).sort((a, b) => b.updatedAt - a.updatedAt)
+  if (!query.trim()) return []
+  const ranked = rankByCosine(query, state.items, (item) => `${item.name} ${item.location} ${item.note || ''}`, 0.16)
+  return ranked.map(({ value }) => value)
 }
 
 export async function exportLocalData(): Promise<string> {
