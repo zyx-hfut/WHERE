@@ -1,33 +1,44 @@
 import { describe, expect, it } from 'vitest'
 import { extractJson, mockPlan, mockSynthesis } from './agent'
 
-describe('agent structured planning', () => {
-  it('recognizes create, move and note requests in the mock provider', () => {
-    expect(mockPlan('把第二个抽屉里的东西都放到床头的储物箱中，删除钱包里的银行卡，便携手电筒放在钱包里')).toMatchObject({ intent: 'multi_step', tasks: [{ intent: 'move_items_by_location' }, { intent: 'delete_item' }, { intent: 'create_item' }] })
-    expect(mockPlan('帮我删掉名称中包含钥匙的物品项')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
-    expect(mockPlan('帮我删掉需要用电的物品项')).toMatchObject({ intent: 'delete_items', queryMode: 'semantic_category', category: 'needs_electricity' })
-    expect(mockPlan('这几个都删掉', '用户：帮我删掉名称中包含钥匙的物品项\nWHERE AI：找到 3 个钥匙候选')).toMatchObject({ intent: 'delete_items', itemNameContains: '钥匙' })
-    expect(mockPlan('帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items', items: [{ name: '作业本' }, { name: '学生证' }, { name: '充电宝' }] })
-    expect(mockPlan('都添加', '用户：帮我添加，我的作业本、学生证、充电宝都在书包里')).toMatchObject({ intent: 'create_items' })
-    expect(mockPlan('帮我记录：雨伞放在书柜架子上')).toMatchObject({ intent: 'create_item', name: '雨伞' })
-    expect(mockPlan('帮我记录：雨伞放在书柜架子上').location).toContain('书柜')
-    expect(mockPlan('电动车现在放在宿舍楼下')).toMatchObject({ intent: 'update_item', itemName: '电动车', newLocation: '宿舍楼下' })
-    expect(mockPlan('给雨伞添加备注：黑色长柄')).toMatchObject({ intent: 'update_note', itemName: '雨伞', note: '黑色长柄' })
-    expect(mockPlan('我的电动车停哪了？')).toMatchObject({ intent: 'query_items', queryMode: 'item_name', query: '电动车' })
-    expect(mockPlan('我的床头柜里存放了哪些东西')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '床头柜' })
-    expect(mockPlan('我的钱包里有什么')).toMatchObject({ intent: 'query_items', queryMode: 'location_contains', locationContains: '钱包' })
-    expect(mockPlan('我的电子设备都放在哪里')).toMatchObject({ intent: 'query_items', queryMode: 'semantic_category', category: 'electronic_device' })
-    expect(mockPlan('我目前一共有哪些物品')).toMatchObject({ intent: 'query_items', queryMode: 'all_items' })
+describe('agent composable tool planning', () => {
+  it('plans a compound request using generic search, update, delete and create tools', () => {
+    const plan = mockPlan('把第二个抽屉里的东西都放到床头的储物箱中，删除钱包里的银行卡，便携手电筒放在钱包里')
+    expect(plan.steps.map((step) => step.tool)).toEqual(['search_items', 'update_item', 'search_items', 'delete_item', 'create_item'])
+    expect(plan.steps[1].forEach).toBe('find-drawer.items')
+    expect(plan.steps[3].forEach).toBe('find-card.items')
   })
 
-  it('rejects unsupported model intents', () => {
-    expect(() => extractJson('{"intent":"run_sql"}')).toThrow('不支持的意图')
+  it('plans a name-based move without a special move tool', () => {
+    const plan = extractJson(JSON.stringify({
+      goal: '把充电宝移动到书桌抽屉',
+      steps: [
+        { id: 'find', tool: 'search_items', purpose: '按名称找到充电宝', args: { name: '充电宝' } },
+        { id: 'move', tool: 'update_item', purpose: '更新位置', forEach: 'find.items', args: { item_id: '$item.id', location: '书桌抽屉' } },
+      ],
+    }))
+    expect(plan.steps[1].tool).toBe('update_item')
+    expect(plan.steps[1].forEach).toBe('find.items')
   })
 
-  it('summarizes container results without duplicating the container record', () => {
+  it('uses an all-items search for inventory questions', () => {
+    const plan = mockPlan('我目前一共有哪些物品')
+    expect(plan.steps[0]).toMatchObject({ tool: 'search_items', args: { scope: 'all' } })
+  })
+
+  it('uses semantic candidate selection for needs-electricity queries', () => {
+    const plan = mockPlan('帮我删掉需要用电的物品项')
+    expect(plan.steps[0]).toMatchObject({ tool: 'search_items', args: { semantic_query: '需要用电' } })
+  })
+
+  it('rejects unregistered tools', () => {
+    expect(() => extractJson(JSON.stringify({ goal: '越权', steps: [{ id: 'bad', tool: 'run_sql', purpose: '越权' }] }))).toThrow('未注册工具')
+    expect(() => extractJson(JSON.stringify({ goal: '错误引用', steps: [{ id: 'update', tool: 'update_item', purpose: '错误引用', forEach: 'missing.items' }] }))).toThrow('不存在的步骤')
+  })
+
+  it('deduplicates container records in the mock synthesis', () => {
     const text = mockSynthesis(JSON.stringify({
-      question: '我的钱包里有什么',
-      plan: { intent: 'query_items', query: '钱包', queryMode: 'location_contains', locationContains: '钱包' },
+      plan: { query: '钱包', queryMode: 'location_contains' },
       items: [
         { id: '1', name: '门钥匙', listId: 'placed', listName: '放在', location: '钱包', icon: '✦', updatedAt: 1 },
         { id: '2', name: '钱包', listId: 'stored', listName: '存有', location: '银行卡', icon: '✦', updatedAt: 1 },
@@ -35,20 +46,5 @@ describe('agent structured planning', () => {
       ],
     }))
     expect(text).toBe('钱包里有：门钥匙、银行卡。')
-  })
-
-  it('includes appliances and power banks in needs-electricity synthesis', () => {
-    const text = mockSynthesis(JSON.stringify({
-      question: '删掉需要用电的物品',
-      plan: { intent: 'delete_items', query: '需要用电', queryMode: 'semantic_category', category: 'needs_electricity' },
-      items: [
-        { id: '1', name: '吹风机', listId: 'placed', listName: '放在', location: '浴室', icon: '✦', updatedAt: 1 },
-        { id: '2', name: '充电宝', listId: 'placed', listName: '放在', location: '床头柜', icon: '✦', updatedAt: 1 },
-        { id: '3', name: '身份证', listId: 'placed', listName: '放在', location: '钱包', icon: '✦', updatedAt: 1 },
-      ],
-    }))
-    expect(text).toContain('吹风机')
-    expect(text).toContain('充电宝')
-    expect(text).not.toContain('身份证')
   })
 })

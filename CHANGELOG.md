@@ -2,6 +2,27 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.10.0-agent-tools] - 2026-09-10
+
+### Changed
+
+- 将智能体从场景专用任务类型重构为通用工具注册表和可组合计划。
+- 工具统一为 `search_items`、`get_lists`、`create_item`、`update_item`、`delete_item`。
+- 支持通过搜索结果引用和 `forEach` 组合任意名称、位置、备注和语义操作。
+- 复合请求可生成多个有序工具步骤，并显示任务分解、工具执行和变更预览。
+- 语义类别查询先获取候选，再由模型进行逐项判断。
+- 能力文档改为工具组合说明，不再依赖固定句式模板。
+- 增加工具白名单、步骤引用校验和通用计划测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test`
+
 ## [0.9.0-agent-planner] - 2026-09-10
 
 ### Added

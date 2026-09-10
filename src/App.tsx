@@ -137,7 +137,7 @@ function App() {
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
-      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.7.0 · Agent Write</div></div>
+      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.10.0 · Agent Tools</div></div>
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} />}

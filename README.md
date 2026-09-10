@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.9.0-agent-planner` 开发阶段，智能体支持多任务分解、按位置批量移动、复合操作预览和透明的逐步校验；同时支持全量物品查询、语义类别筛选、确认式批量删除、全局搜索、账号设置、本地备份恢复和列表管理。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.10.0-agent-tools` 开发阶段，智能体通过通用工具注册表和可组合计划完成复合任务，不再为每种用户说法增加专用任务类型；同时支持透明的逐步校验、全量查询、语义筛选、确认式写操作、全局搜索和本地账号数据。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 
