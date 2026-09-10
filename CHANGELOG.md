@@ -2,6 +2,21 @@
 
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
+## [0.10.1-agent-search-normalization] - 2026-09-10
+
+### Fixed
+
+- 修复模型规划“搜索后删除”时因中文位置表述差异导致候选为 0 的问题。
+- 名称、位置和备注检索支持常见中文虚词/量词归一化。
+- 检索参数兼容 snake_case 与 camelCase。
+- 增加“床头柜第一个抽屉”与“床头柜的第一个抽屉”匹配测试。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+
 ## [0.10.0-agent-tools] - 2026-09-10
 
 ### Changed

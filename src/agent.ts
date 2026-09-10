@@ -27,6 +27,8 @@ type ToolObservation = { items?: Item[]; lists?: Awaited<ReturnType<typeof getLi
 export const defaultConfig: AgentProviderConfig = { presetId: 'default', provider: 'mock', name: 'Mock 测试模型', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' }
 function unique(values: string[]) { return [...new Set(values.filter(Boolean))] }
 function normalized(value: string) { return value.toLocaleLowerCase().replace(/[\s“”"'？?。！!，,、：:；;]/g, '') }
+export function normalizedSearchText(value: string) { return normalized(value).replace(/[的个]/g, '') }
+function matchesSearchText(value: string, query: string) { const actual = normalizedSearchText(value); const expected = normalizedSearchText(query); return Boolean(expected) && (actual === expected || actual.includes(expected)) }
 
 function retrieveCapabilities(message: string) {
   const terms = [...normalized(message)]
@@ -89,7 +91,11 @@ async function runTool(step: PlanStep, observations: Map<string, ToolObservation
   if (step.tool === 'get_lists') return { lists: await getLists() }
   if (step.tool === 'search_items') {
     const lists = await getLists(); const all = (await Promise.all(lists.map((list) => getItems(list.id)))).flat()
-    let items = args.scope === 'all' ? all : all.filter((item) => (!args.name || item.name === args.name) && (!args.name_contains || item.name.toLocaleLowerCase().includes(String(args.name_contains).toLocaleLowerCase())) && (!args.location_contains || normalized(item.location).includes(normalized(String(args.location_contains)))) && (!args.note_contains || normalized(item.note || '').includes(normalized(String(args.note_contains)))))
+    const name = String(args.name || args.name_exact || '')
+    const nameContains = String(args.name_contains || args.nameContains || '')
+    const locationContains = String(args.location_contains || args.locationContains || '')
+    const noteContains = String(args.note_contains || args.noteContains || '')
+    let items = args.scope === 'all' ? all : all.filter((item) => (!name || matchesSearchText(item.name, name)) && (!nameContains || matchesSearchText(item.name, nameContains)) && (!locationContains || matchesSearchText(item.location, locationContains)) && (!noteContains || matchesSearchText(item.note || '', noteContains)))
     if (args.semantic_query) { const raw = await provider.complete({ system: '你是语义筛选器。根据用户类别从候选中选择符合项，只返回 JSON：{"itemNames":["..."]}。不得编造。', user: JSON.stringify({ category: args.semantic_query, items: all }) }); const selected = JSON.parse(raw) as { itemNames?: string[] }; items = all.filter((item) => selected.itemNames?.includes(item.name)) }
     return { items }
   }

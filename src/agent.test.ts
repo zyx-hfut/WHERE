@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractJson, mockPlan, mockSynthesis } from './agent'
+import { extractJson, mockPlan, mockSynthesis, normalizedSearchText } from './agent'
 
 describe('agent composable tool planning', () => {
   it('plans a compound request using generic search, update, delete and create tools', () => {
@@ -46,5 +46,10 @@ describe('agent composable tool planning', () => {
       ],
     }))
     expect(text).toBe('钱包里有：门钥匙、银行卡。')
+  })
+
+  it('matches natural location variants such as optional 的 and 个', () => {
+    expect(normalizedSearchText('床头柜第一个抽屉')).toBe(normalizedSearchText('床头柜的第一个抽屉'))
+    expect(normalizedSearchText('床头柜第一个抽屉')).toContain(normalizedSearchText('床头柜的第一个抽屉'))
   })
 })
