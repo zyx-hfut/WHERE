@@ -1,4 +1,5 @@
-import { createItem, deleteItem, getItems, getLists, searchItems, updateItem } from './storage'
+import { createItem, createList, deleteItem, getItems, getLists, searchItems, updateItem } from './storage'
+import type { ItemList } from './types'
 import type { Item, ItemInput } from './types'
 import capabilityDocument from '../knowledge/agent-capabilities.md?raw'
 import { rankByCosine } from './vector-match'
@@ -7,30 +8,32 @@ export type AgentProvider = 'mock' | 'deepseek'
 export type AgentProviderConfig = { presetId: string; provider: AgentProvider; name: string; baseUrl: string; model: string; apiKey?: string }
 export type AgentStep = { name: string; detail: string; status: 'done' | 'current' | 'error' }
 export type QueryMode = 'item_name' | 'location_contains' | 'semantic_category' | 'all_items'
-export type ToolName = 'search_items' | 'get_lists' | 'create_item' | 'update_item' | 'delete_item'
+export type ToolName = 'search_items' | 'get_lists' | 'create_list' | 'create_item' | 'update_item' | 'delete_item'
 export const TOOL_DEFINITIONS: Array<{ name: ToolName; description: string; readOnly: boolean; arguments: string[] }> = [
   { name: 'search_items', description: '按名称、名称包含、位置包含、备注或语义类别查找物品；scope=all 时返回全部物品', readOnly: true, arguments: ['name', 'name_contains', 'location_contains', 'note_contains', 'semantic_query', 'scope'] },
   { name: 'get_lists', description: '读取当前账号的物品列表', readOnly: true, arguments: [] },
-  { name: 'create_item', description: '新增一个物品，必须提供 name 和 location', readOnly: false, arguments: ['name', 'location', 'list_name', 'note'] },
+  { name: 'create_list', description: '新增一个物品列表；物品可以通过 list_ref 引用本步骤创建的列表', readOnly: false, arguments: ['name', 'icon'] },
+  { name: 'create_item', description: '新增一个物品，必须提供 name、location，并明确 list_name 或 list_ref', readOnly: false, arguments: ['name', 'location', 'list_name', 'list_ref', 'note'] },
   { name: 'update_item', description: '更新一个已有物品，通常使用 forEach 引用 search_items 的结果和 $item.id', readOnly: false, arguments: ['item_id', 'location', 'name', 'note', 'list_name'] },
   { name: 'delete_item', description: '删除一个已有物品，必须使用已检索到的 item_id', readOnly: false, arguments: ['item_id'] },
 ]
 export type PlanStep = { id: string; tool: ToolName; purpose: string; args?: Record<string, unknown>; forEach?: string }
 export type AgentPlan = { goal: string; steps: PlanStep[]; intent?: string; query?: string; queryMode?: QueryMode; category?: string; itemName?: string; name?: string; location?: string; listName?: string; reply?: string }
-export type PendingAction = { type: 'create_item' | 'update_item' | 'delete_item' | 'batch'; description: string; input?: ItemInput; item?: Item; actions?: PendingAction[] }
-export type AtomicActionPreview = { operation: '新增' | '修改' | '删除'; subject: string; before?: string; after?: string; detail: string }
+export type PendingAction = { type: 'create_list' | 'create_item' | 'update_item' | 'delete_item' | 'batch'; description: string; listName?: string; listRef?: string; input?: ItemInput; item?: Item; actions?: PendingAction[] }
+export type AtomicActionPreview = { operation: '新建列表' | '新增' | '修改' | '删除'; subject: string; before?: string; after?: string; detail: string }
 export type AgentAnswer = { text: string; items: Item[]; query: string; plan: AgentPlan; pendingAction?: PendingAction; provider: AgentProvider; steps: AgentStep[] }
 export type AgentProgress = { type: 'step'; step: AgentStep } | { type: 'token'; token: string }
 
 type CompletionRequest = { system: string; user: string; context?: string }
 type CompletionProvider = { complete(request: CompletionRequest): Promise<string>; stream?(request: CompletionRequest, onToken: (token: string) => void): Promise<string> }
-type ToolObservation = { items?: Item[]; lists?: Awaited<ReturnType<typeof getLists>> }
+type ToolObservation = { items?: Item[]; lists?: ItemList[]; list?: ItemList }
 
 export const defaultConfig: AgentProviderConfig = { presetId: 'default', provider: 'mock', name: 'Mock 测试模型', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' }
 
 export function describePendingAction(action: PendingAction): AtomicActionPreview[] {
   if (action.type === 'batch') return (action.actions || []).flatMap(describePendingAction)
-  if (action.type === 'create_item' && action.input) return [{ operation: '新增', subject: action.input.name, after: action.input.location, detail: `新增“${action.input.name}”，位置：${action.input.location}` }]
+  if (action.type === 'create_list') return [{ operation: '新建列表', subject: action.listName || action.description, detail: `新建列表“${action.listName || action.description}”` }]
+  if (action.type === 'create_item' && action.input) return [{ operation: '新增', subject: action.input.name, after: action.input.location, detail: `新增“${action.input.name}”，列表：${action.listName || action.input.listId}，位置：${action.input.location}` }]
   if (action.type === 'update_item' && action.item && action.input) return [{ operation: '修改', subject: action.item.name, before: action.item.location, after: action.input.location, detail: `将“${action.item.name}”从“${action.item.location}”移动到“${action.input.location}”` }]
   if (action.type === 'delete_item' && action.item) return [{ operation: '删除', subject: action.item.name, before: action.item.location, detail: `删除“${action.item.name}”（当前位置：${action.item.location}）` }]
   return [{ operation: '修改', subject: action.description, detail: action.description }]
@@ -48,7 +51,7 @@ export function extractJson(value: string): AgentPlan {
   if (start < 0 || end <= start) throw new Error('模型没有返回结构化计划')
   const parsed = JSON.parse(cleaned.slice(start, end + 1)) as AgentPlan
   if (!parsed.goal || !Array.isArray(parsed.steps)) throw new Error('模型返回的计划格式不完整')
-  const tools: ToolName[] = ['search_items', 'get_lists', 'create_item', 'update_item', 'delete_item']
+  const tools: ToolName[] = ['search_items', 'get_lists', 'create_list', 'create_item', 'update_item', 'delete_item']
   if (parsed.steps.some((step) => !step.id || !tools.includes(step.tool))) throw new Error('模型计划包含未注册工具')
   const stepIds = new Set(parsed.steps.map((step) => step.id))
   if (parsed.steps.some((step) => step.forEach && !stepIds.has(step.forEach.split('.')[0]))) throw new Error('模型计划引用了不存在的步骤')
@@ -57,6 +60,11 @@ export function extractJson(value: string): AgentPlan {
 
 export function mockPlan(message: string): AgentPlan {
   const input = normalized(message)
+  if (input.includes('新增列表密码a平台的密码是xxxxxxb平台的密码是yyyyyy')) return { goal: '创建密码列表并记录两个密码', steps: [
+    { id: 'password-list', tool: 'create_list', purpose: '创建名为密码的列表', args: { name: '密码' } },
+    { id: 'platform-a-password', tool: 'create_item', purpose: '将 A 平台密码记录到密码列表', args: { name: 'A平台的密码', location: 'A平台', note: 'xxxxxx', list_ref: 'password-list' } },
+    { id: 'platform-b-password', tool: 'create_item', purpose: '将 B 平台密码记录到密码列表', args: { name: 'B平台的密码', location: 'B平台', note: 'yyyyyy', list_ref: 'password-list' } },
+  ] }
   if (input.includes('第二个抽屉里的东西都放到床头的储物箱中删除钱包里的银行卡便携手电筒放在钱包里')) return { goal: '完成三个物品位置操作', steps: [
     { id: 'find-drawer', tool: 'search_items', purpose: '找到第二个抽屉中的物品', args: { location_contains: '第二个抽屉' } },
     { id: 'move-drawer', tool: 'update_item', purpose: '将找到的物品移动到床头储物箱', forEach: 'find-drawer.items', args: { item_id: '$item.id', location: '床头的储物箱中' } },
@@ -97,6 +105,11 @@ function synthesisSystem() { return `你是 WHERE 的最终回答整理器。根
 async function runTool(step: PlanStep, observations: Map<string, ToolObservation>, provider: CompletionProvider): Promise<ToolObservation> {
   const args = step.args || {}
   if (step.tool === 'get_lists') return { lists: await getLists() }
+  if (step.tool === 'create_list') {
+    const name = String(args.name || args.list_name || '').trim()
+    if (!name) return { lists: [] }
+    return { list: { id: step.id, name, icon: String(args.icon || '✦'), count: 0 }, lists: [{ id: step.id, name, icon: String(args.icon || '✦'), count: 0 }] }
+  }
   if (step.tool === 'search_items') {
     const lists = await getLists(); const all = (await Promise.all(lists.map((list) => getItems(list.id)))).flat()
     const name = String(args.name || args.name_exact || '')
@@ -117,10 +130,17 @@ async function runTool(step: PlanStep, observations: Map<string, ToolObservation
 function itemFromReference(value: unknown, item: Item): unknown { return value === '$item.id' ? item.id : value }
 async function stageStep(step: PlanStep, observations: Map<string, ToolObservation>, provider: CompletionProvider): Promise<{ actions: PendingAction[]; items: Item[]; detail: string }> {
   if (step.tool === 'search_items' || step.tool === 'get_lists') { const result = await runTool(step, observations, provider); observations.set(step.id, result); return { actions: [], items: result.items || [], detail: `返回 ${result.items?.length || result.lists?.length || 0} 条结果` } }
+  if (step.tool === 'create_list') {
+    const result = await runTool(step, observations, provider)
+    observations.set(step.id, result)
+    const list = result.list
+    if (!list) return { actions: [], items: [], detail: '列表名称缺失，无法创建列表' }
+    return { actions: [{ type: 'create_list', description: `新建列表“${list.name}”`, listName: list.name, listRef: step.id }], items: [], detail: `生成列表“${list.name}”的新建预览` }
+  }
   let targets: Item[] = []
   if (step.forEach) targets = observations.get(step.forEach.split('.')[0])?.items || []
   if (!targets.length && step.tool !== 'create_item') return { actions: [], items: [], detail: '没有可执行的候选项' }
-  if (step.tool === 'create_item') { const args = step.args || {}; const lists = await getLists(); const list = lists.find((entry) => entry.name === args.list_name) || lists[0]; if (!list || !args.name || !args.location) return { actions: [], items: [], detail: '创建参数不完整' }; return { actions: [{ type: 'create_item', description: `新增“${args.name} ${list.name} ${args.location}”`, input: { listId: list.id, name: String(args.name), location: String(args.location), note: args.note ? String(args.note) : undefined } }], items: [], detail: '生成新增预览' } }
+  if (step.tool === 'create_item') { const args = step.args || {}; const lists = await getLists(); const ref = String(args.list_ref || args.listRef || ''); const plannedList = ref ? observations.get(ref)?.list : undefined; const list = plannedList || lists.find((entry) => entry.name === args.list_name || entry.name === args.listName) || lists[0]; if (!list || !args.name || !args.location || (!args.list_name && !args.listName && !ref && lists.length === 0)) return { actions: [], items: [], detail: '创建参数不完整或缺少目标列表' }; return { actions: [{ type: 'create_item', description: `新增“${args.name} ${list.name} ${args.location}”`, listName: list.name, listRef: ref || undefined, input: { listId: list.id, name: String(args.name), location: String(args.location), note: args.note ? String(args.note) : undefined } }], items: [], detail: `生成新增预览（列表：${list.name}）` } }
   const actions = targets.map((item) => {
     if (step.tool === 'delete_item') return { type: 'delete_item' as const, description: `删除“${item.name}”`, item }
     const args = step.args || {}
@@ -138,7 +158,22 @@ export async function runAgent(message: string, config: AgentProviderConfig = de
   const text = await (provider.stream ? provider.stream(synthesisRequest, (token) => onProgress?.({ type: 'token', token })) : provider.complete(synthesisRequest)); return { text, items: searchResults, query, plan, provider: config.provider, steps: [...steps, planningStep, { name: '检索本地数据', detail: `返回 ${searchResults.length} 条候选`, status: 'done' }, { name: '整理结果', detail: '模型已分析工具结果并生成回答', status: 'current' }] }
 }
 
-export async function confirmAgentAction(action: PendingAction) { if (action.type === 'batch' && action.actions) for (const child of action.actions) await confirmAgentAction(child); else if (action.type === 'create_item' && action.input) await createItem(action.input); else if (action.type === 'update_item' && action.item && action.input) await updateItem(action.item.id, action.input); else if (action.type === 'delete_item' && action.item) await deleteItem(action.item.id); else if (action.type !== 'batch') throw new Error('无效的智能体操作'); window.dispatchEvent(new CustomEvent('where:data-changed')); return action.description + '已完成，历史记录已保存。' }
+export async function confirmAgentAction(action: PendingAction, listRefs = new Map<string, string>()) {
+  if (action.type === 'batch' && action.actions) {
+    for (const child of action.actions) await confirmAgentAction(child, listRefs)
+  } else if (action.type === 'create_list' && action.listName) {
+    const list = await createList(action.listName)
+    if (action.listRef) listRefs.set(action.listRef, list.id)
+  } else if (action.type === 'create_item' && action.input) {
+    const listId = action.listRef ? listRefs.get(action.listRef) : action.input.listId
+    if (!listId) throw new Error(`列表“${action.listName || action.listRef}”创建失败`)
+    await createItem({ ...action.input, listId })
+  } else if (action.type === 'update_item' && action.item && action.input) await updateItem(action.item.id, action.input)
+  else if (action.type === 'delete_item' && action.item) await deleteItem(action.item.id)
+  else if (action.type !== 'batch') throw new Error('无效的智能体操作')
+  window.dispatchEvent(new CustomEvent('where:data-changed'))
+  return action.description + '已完成，历史记录已保存。'
+}
 export async function runLocalAgent(message: string): Promise<AgentAnswer> { return runAgent(message, defaultConfig) }
 
-function agentSystem(capabilities: string, context = '') { return `你是 WHERE 物品管理智能体。先阅读能力说明，再生成可执行的工具计划。只返回 JSON，不要 Markdown，不要 SQL。不要为每一种说法发明新工具，使用工具注册表中的通用工具组合完成需求。复杂请求使用多个有序 steps；后续步骤可使用 forEach: "步骤ID.items" 和 "$item.id" 引用前一步结果。语义类别由你根据用户语义命名，并通过 semantic_query 搜索候选；最终判断必须基于候选事实。写操作只生成计划，等待用户确认。\n\n工具计划格式：{"goal":"...","steps":[{"id":"...","tool":"工具名","purpose":"...","args":{},"forEach":"步骤ID.items"}]}\n\n工具注册表：\n${JSON.stringify(TOOL_DEFINITIONS)}\n\n能力说明：\n${capabilities}\n\n对话上下文：\n${context || '无'}` }
+function agentSystem(capabilities: string, context = '') { return `你是 WHERE 物品管理智能体。先阅读能力说明，再生成可执行的工具计划。只返回 JSON，不要 Markdown，不要 SQL。不要为每一种说法发明新工具，使用工具注册表中的通用工具组合完成需求。复杂请求使用多个有序 steps；后续步骤可使用 forEach: "步骤ID.items" 和 "$item.id" 引用前一步结果。涉及列表时，必须先判断是使用现有列表还是创建新列表；创建新列表使用 create_list，后续 create_item 必须通过 list_ref: "创建列表步骤ID" 绑定它，不能把列表名称当成物品位置、备注或普通字符串。每个 create_item 都必须明确 list_name 或 list_ref。写操作只生成计划，等待用户确认。\n\n工具计划格式：{"goal":"...","steps":[{"id":"...","tool":"工具名","purpose":"...","args":{},"forEach":"步骤ID.items"}]}\n\n工具注册表：\n${JSON.stringify(TOOL_DEFINITIONS)}\n\n能力说明：\n${capabilities}\n\n对话上下文：\n${context || '无'}` }

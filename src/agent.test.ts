@@ -10,6 +10,14 @@ describe('agent composable tool planning', () => {
     expect(plan.steps[3].forEach).toBe('find-card.items')
   })
 
+  it('plans a list creation before binding password items to that list', () => {
+    const plan = mockPlan('新增列表：密码，A平台的密码是xxxxxx，B平台的密码是yyyyyy')
+    expect(plan.steps.map((step) => step.tool)).toEqual(['create_list', 'create_item', 'create_item'])
+    expect(plan.steps[0].args).toMatchObject({ name: '密码' })
+    expect(plan.steps[1].args).toMatchObject({ list_ref: 'password-list', note: 'xxxxxx' })
+    expect(plan.steps[2].args).toMatchObject({ list_ref: 'password-list', note: 'yyyyyy' })
+  })
+
   it('plans a name-based move without a special move tool', () => {
     const plan = extractJson(JSON.stringify({
       goal: '把充电宝移动到书桌抽屉',

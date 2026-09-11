@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-当前处于 `v0.11.1-action-preview` 开发阶段，智能体支持通用工具组合、向量检索、复合计划和逐条原子操作预览；语义类别仍由 LLM 对候选物品进行判断。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+当前处于 `v0.12.0-lists-groups` 开发阶段，列表已作为智能体可规划的独立原子操作，物品支持按位置、按物品分组折叠展示；同时保留通用工具组合、向量检索、复合计划和原子操作预览。完整需求拆解、技术路线、数据模型和迭代计划见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)，架构约束见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 产品目标
 

@@ -137,7 +137,7 @@ function App() {
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
-      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.11.0 · Vector Search</div></div>
+      <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.12.0 · Lists & Groups</div></div>
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} />}
@@ -161,6 +161,7 @@ function NavButton({ active, icon, label, badge, onClick }: { active: boolean; i
 
 function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists, onSearch }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void; onSearch: () => void }) {
   const [manage, setManage] = useState(false)
+  const [groupMode, setGroupMode] = useState<'none' | 'location' | 'name'>('location')
   const [selected, setSelected] = useState<string[]>([])
   const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])
   const exitManage = () => { setManage(false); setSelected([]) }
@@ -169,11 +170,20 @@ function ItemsPage({ lists, activeList, activeListName, items, loading, onSelect
     <section className="page-intro"><p>把重要的东西，放在记得住的地方。</p><button className="primary-button" onClick={onAdd}><span>＋</span> 添加物品</button></section>
     <div className="list-toolbar"><span className="muted">{manage ? `已选择 ${selected.length} 个列表` : '物品列表'}</span><div>{manage ? <><button className="toolbar-button danger" disabled={!selected.length} onClick={() => { onDeleteLists(selected); exitManage() }}>删除选中</button><button className="toolbar-button" onClick={exitManage}>完成</button></> : <button className="toolbar-button" onClick={() => setManage(true)}>管理列表</button>}</div></div>
     <div className="list-tabs" role="tablist" aria-label="物品列表">{lists.map((list) => manage ? <label key={list.id} className={`list-tab manage-tab ${selected.includes(list.id) ? 'selected' : ''}`}><input type="checkbox" checked={selected.includes(list.id)} onChange={() => toggle(list.id)} /><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></label> : <button key={list.id} role="tab" aria-selected={activeList === list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></button>)}<button className="add-list-button" title="新建列表" onClick={onAddList}>＋</button></div>
-    <section className="items-panel"><div className="panel-heading"><div><h2>{activeListName}</h2><span className="muted">按最近更新排序 · 本地数据库</span></div></div>
-      {loading ? <div className="loading-state"><span className="spinner" />正在打开本地数据…</div> : items.length ? <div className="item-list">{items.map((item) => <ItemRow key={item.id} item={item} onEdit={onEdit} onDelete={onDelete} onHistory={onHistory} />)}</div> : <EmptyState onAdd={onAdd} />}
+    <section className="items-panel"><div className="panel-heading"><div><h2>{activeListName}</h2><span className="muted">按最近更新排序 · 本地数据库</span></div><div className="group-switcher" role="group" aria-label="展示方式"><button className={groupMode === 'location' ? 'selected' : ''} onClick={() => setGroupMode('location')}>按位置</button><button className={groupMode === 'name' ? 'selected' : ''} onClick={() => setGroupMode('name')}>按物品</button><button className={groupMode === 'none' ? 'selected' : ''} onClick={() => setGroupMode('none')}>平铺</button></div></div>
+      {loading ? <div className="loading-state"><span className="spinner" />正在打开本地数据…</div> : items.length ? <GroupedItems items={items} mode={groupMode} onEdit={onEdit} onDelete={onDelete} onHistory={onHistory} /> : <EmptyState onAdd={onAdd} />}
     </section>
     <div className="hint-bar"><span className="hint-key">⌁</span><span>物品写入本地 SQLite，并为每次新建、修改和删除保留历史记录</span></div>
   </>
+}
+
+function GroupedItems({ items, mode, onEdit, onDelete, onHistory }: { items: Item[]; mode: 'none' | 'location' | 'name'; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  if (mode === 'none') return <div className="item-list">{items.map((item) => <ItemRow key={item.id} item={item} onEdit={onEdit} onDelete={onDelete} onHistory={onHistory} />)}</div>
+  const groups = new Map<string, Item[]>()
+  for (const item of items) { const key = mode === 'location' ? item.location : item.name; groups.set(key, [...(groups.get(key) || []), item]) }
+  const toggle = (key: string) => setCollapsed((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })
+  return <div className="grouped-item-list">{[...groups.entries()].map(([key, group]) => <section className="item-group" key={key}><button className="item-group-heading" onClick={() => toggle(key)}><span className="group-chevron">{collapsed.has(key) ? '›' : '⌄'}</span><strong>{key}</strong><span className="group-count">{group.length}</span>{mode === 'location' && <small>位置</small>}</button>{!collapsed.has(key) && <div className="item-list group-items">{group.map((item) => <ItemRow key={item.id} item={item} onEdit={onEdit} onDelete={onDelete} onHistory={onHistory} />)}</div>}</section>)}</div>
 }
 
 function ItemRow({ item, onEdit, onDelete, onHistory }: { item: Item; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void }) {
