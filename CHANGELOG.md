@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1-updater-key-rotation] - 2026-09-15
+
+### Security
+
+- 轮换 Tauri 更新签名公钥；GitHub Actions 需要同步替换为对应的新私钥 Secret。
+
 ## [0.14.0-dialog-updater] - 2026-09-15
 
 ### Added
