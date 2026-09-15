@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { Attachment, HistoryEntry, Item, ItemInput, ItemList } from './types'
+import type { Attachment, BackupData, HistoryEntry, HistoryPage, Item, ItemInput, ItemList } from './types'
 import { getCurrentAccountId } from './auth'
 import { rankByCosine } from './vector-match'
 
@@ -57,14 +57,29 @@ export async function searchItems(query: string): Promise<Item[]> {
 }
 
 export async function exportLocalData(): Promise<string> {
-  if (isTauri()) throw new Error('桌面端备份导出将在同步模块中接入系统文件选择器')
-  return JSON.stringify(readLocal(), null, 2)
+  if (isTauri()) return JSON.stringify(await invoke<BackupData>('export_backup'), null, 2)
+  const state = readLocal()
+  const attachments = Object.values(state.attachments || {}).map((attachment) => ({
+    metadata: { ...attachment, dataUrl: undefined },
+    relativePath: `${attachment.id}.data`,
+    dataUrl: attachment.dataUrl,
+  }))
+  return JSON.stringify({ format: 'where-account-backup', version: 1, exportedAt: Date.now(), lists: state.lists, items: state.items, history: state.history, attachments }, null, 2)
 }
 
 export async function importLocalData(serialized: string): Promise<void> {
-  const parsed = JSON.parse(serialized) as LocalState
+  const parsed = JSON.parse(serialized) as Partial<BackupData> & Partial<LocalState>
+  if (parsed.format === 'where-account-backup') {
+    if (parsed.version !== 1 || !Array.isArray(parsed.lists) || !Array.isArray(parsed.items) || !Array.isArray(parsed.history) || !Array.isArray(parsed.attachments)) throw new Error('备份文件格式不正确')
+    if (isTauri()) { await invoke('import_backup', { backup: parsed }); return }
+    const attachments: Record<string, Attachment> = {}
+    for (const entry of parsed.attachments) if (entry.metadata?.itemId) attachments[entry.metadata.itemId] = { ...entry.metadata, dataUrl: entry.dataUrl }
+    writeLocal({ lists: parsed.lists, items: parsed.items, history: parsed.history, attachments })
+    return
+  }
   if (!Array.isArray(parsed.lists) || !Array.isArray(parsed.items) || !Array.isArray(parsed.history)) throw new Error('备份文件格式不正确')
-  writeLocal(parsed)
+  if (isTauri()) throw new Error('不支持恢复旧版浏览器备份，请使用新版备份文件')
+  writeLocal({ lists: parsed.lists, items: parsed.items, history: parsed.history, attachments: parsed.attachments })
 }
 
 export function resetDemoData() {
@@ -118,6 +133,36 @@ export async function deleteItem(id: string): Promise<void> {
 export async function getItemHistory(itemId: string): Promise<HistoryEntry[]> {
   if (isTauri()) return invoke<HistoryEntry[]>('get_item_history', { itemId })
   return readLocal().history.filter((entry) => entry.itemId === itemId)
+}
+
+export async function getHistoryPage(page = 1, pageSize = 12): Promise<HistoryPage> {
+  if (isTauri()) return invoke<HistoryPage>('get_history_page', { page, pageSize })
+  const state = readLocal()
+  const entries = state.history.map((entry) => {
+    const snapshot = entry.afterJson || entry.beforeJson
+    let item: Partial<Item> = {}
+    try { item = snapshot ? JSON.parse(snapshot) as Partial<Item> : {} } catch { /* legacy malformed snapshot */ }
+    const current = state.items.find((candidate) => candidate.id === entry.itemId)
+    return { ...entry, itemName: entry.itemName || item.name || current?.name, listName: entry.listName || item.listName || current?.listName, location: entry.location || item.location || current?.location }
+  }).sort((a, b) => b.createdAt - a.createdAt)
+  const safePageSize = Math.max(1, Math.min(100, pageSize))
+  const totalPages = entries.length ? Math.ceil(entries.length / safePageSize) : 0
+  const safePage = Math.max(1, Math.min(page, Math.max(1, totalPages)))
+  return { entries: entries.slice((safePage - 1) * safePageSize, safePage * safePageSize), page: safePage, pageSize: safePageSize, total: entries.length, totalPages }
+}
+
+export async function deleteHistory(id: number): Promise<void> {
+  if (isTauri()) return invoke('delete_history', { id })
+  const state = readLocal()
+  state.history = state.history.filter((entry) => entry.id !== id)
+  writeLocal(state)
+}
+
+export async function clearHistory(): Promise<void> {
+  if (isTauri()) { await invoke('clear_history'); return }
+  const state = readLocal()
+  state.history = []
+  writeLocal(state)
 }
 
 export async function getItemAttachment(itemId: string): Promise<Attachment | null> {

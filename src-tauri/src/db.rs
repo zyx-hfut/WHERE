@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemListDto {
     pub id: String,
@@ -11,7 +11,7 @@ pub struct ItemListDto {
     pub icon: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {
     pub id: String,
@@ -24,7 +24,7 @@ pub struct ItemDto {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryDto {
     pub id: i64,
@@ -33,9 +33,42 @@ pub struct HistoryDto {
     pub before_json: Option<String>,
     pub after_json: Option<String>,
     pub created_at: i64,
+    pub item_name: Option<String>,
+    pub list_name: Option<String>,
+    pub location: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupAttachment {
+    pub metadata: AttachmentDto,
+    pub relative_path: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupData {
+    pub format: String,
+    pub version: i32,
+    pub exported_at: i64,
+    pub lists: Vec<ItemListDto>,
+    pub items: Vec<ItemDto>,
+    pub history: Vec<HistoryDto>,
+    pub attachments: Vec<BackupAttachment>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPage {
+    pub entries: Vec<HistoryDto>,
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+    pub total_pages: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentDto {
     pub id: String,
@@ -354,7 +387,7 @@ impl Database {
     }
 
     pub fn history(&self, item_id: String) -> Result<Vec<HistoryDto>, String> {
-        let mut statement = self.connection.prepare("SELECT id, item_id, action, before_json, after_json, created_at FROM item_history WHERE item_id = ?1 ORDER BY created_at DESC, id DESC").map_err(|error| error.to_string())?;
+        let mut statement = self.connection.prepare("SELECT h.id, h.item_id, h.action, h.before_json, h.after_json, h.created_at, i.name, l.name, i.location FROM item_history h LEFT JOIN items i ON i.id = h.item_id LEFT JOIN item_lists l ON l.id = i.list_id WHERE h.item_id = ?1 ORDER BY h.created_at DESC, h.id DESC").map_err(|error| error.to_string())?;
         let rows = statement
             .query_map(params![item_id], |row| {
                 Ok(HistoryDto {
@@ -364,11 +397,155 @@ impl Database {
                     before_json: row.get(3)?,
                     after_json: row.get(4)?,
                     created_at: row.get(5)?,
+                    item_name: row.get(6)?,
+                    list_name: row.get(7)?,
+                    location: row.get(8)?,
                 })
             })
             .map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())
+    }
+
+    pub fn history_page(&self, page: i64, page_size: i64) -> Result<HistoryPage, String> {
+        let page = page.max(1);
+        let page_size = page_size.clamp(1, 100);
+        let total: i64 = self
+            .connection
+            .query_row("SELECT COUNT(*) FROM item_history", [], |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        let total_pages = if total == 0 {
+            0
+        } else {
+            (total + page_size - 1) / page_size
+        };
+        let offset = (page - 1) * page_size;
+        let mut statement = self.connection.prepare("SELECT h.id, h.item_id, h.action, h.before_json, h.after_json, h.created_at, i.name, l.name, i.location FROM item_history h LEFT JOIN items i ON i.id = h.item_id LEFT JOIN item_lists l ON l.id = i.list_id ORDER BY h.created_at DESC, h.id DESC LIMIT ?1 OFFSET ?2").map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![page_size, offset], history_from_row)
+            .map_err(|error| error.to_string())?;
+        let entries = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        Ok(HistoryPage {
+            entries,
+            page,
+            page_size,
+            total,
+            total_pages,
+        })
+    }
+
+    pub fn delete_history(&self, id: i64) -> Result<(), String> {
+        let deleted = self
+            .connection
+            .execute("DELETE FROM item_history WHERE id = ?1", params![id])
+            .map_err(|error| error.to_string())?;
+        if deleted == 0 {
+            return Err("历史记录不存在".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn clear_history(&self) -> Result<i64, String> {
+        self.connection
+            .execute("DELETE FROM item_history", [])
+            .map(|count| count as i64)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn all_items(&self) -> Result<Vec<ItemDto>, String> {
+        let lists = self.lists()?;
+        let mut items = Vec::new();
+        for list in lists {
+            items.extend(self.items(list.id)?);
+        }
+        Ok(items)
+    }
+
+    pub fn all_history(&self) -> Result<Vec<HistoryDto>, String> {
+        let mut statement = self.connection.prepare("SELECT h.id, h.item_id, h.action, h.before_json, h.after_json, h.created_at, i.name, l.name, i.location FROM item_history h LEFT JOIN items i ON i.id = h.item_id LEFT JOIN item_lists l ON l.id = i.list_id ORDER BY h.created_at DESC, h.id DESC").map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], history_from_row)
+            .map_err(|error| error.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn export_backup(&self, attachments_dir: &Path) -> Result<BackupData, String> {
+        let mut attachments = Vec::new();
+        let mut statement = self.connection.prepare("SELECT id, item_id, file_name, mime_type, size, relative_path, created_at, updated_at FROM item_attachments").map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    AttachmentDto {
+                        id: row.get(0)?,
+                        item_id: row.get(1)?,
+                        file_name: row.get(2)?,
+                        mime_type: row.get(3)?,
+                        size: row.get(4)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
+                    },
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (metadata, relative_path) = row.map_err(|error| error.to_string())?;
+            let path = safe_path(attachments_dir, &relative_path);
+            let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+            attachments.push(BackupAttachment {
+                metadata,
+                relative_path,
+                bytes,
+            });
+        }
+        Ok(BackupData {
+            format: "where-account-backup".to_string(),
+            version: 1,
+            exported_at: now_ms(),
+            lists: self.lists()?,
+            items: self.all_items()?,
+            history: self.all_history()?,
+            attachments,
+        })
+    }
+
+    pub fn import_backup(
+        &mut self,
+        backup: &BackupData,
+        attachments_dir: &Path,
+    ) -> Result<(), String> {
+        if backup.format != "where-account-backup" || backup.version != 1 {
+            return Err("不支持的备份格式".to_string());
+        }
+        std::fs::create_dir_all(attachments_dir).map_err(|error| error.to_string())?;
+        for attachment in &backup.attachments {
+            std::fs::write(
+                safe_path(attachments_dir, &attachment.relative_path),
+                &attachment.bytes,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| error.to_string())?;
+        transaction.execute_batch("DELETE FROM item_history; DELETE FROM item_attachments; DELETE FROM items; DELETE FROM item_lists;").map_err(|error| error.to_string())?;
+        for list in &backup.lists {
+            transaction.execute("INSERT INTO item_lists (id, name, icon, sort_order, created_at) VALUES (?1, ?2, ?3, ?4, ?5)", params![list.id, list.name, list.icon, 0, now_ms()]).map_err(|error| error.to_string())?;
+        }
+        for item in &backup.items {
+            transaction.execute("INSERT INTO items (id, list_id, name, location, note, icon, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![item.id, item.list_id, item.name, item.location, item.note, item.icon, item.updated_at, item.updated_at]).map_err(|error| error.to_string())?;
+        }
+        for entry in &backup.history {
+            transaction.execute("INSERT INTO item_history (id, item_id, action, before_json, after_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![entry.id, entry.item_id, entry.action, entry.before_json, entry.after_json, entry.created_at]).map_err(|error| error.to_string())?;
+        }
+        for attachment in &backup.attachments {
+            transaction.execute("INSERT INTO item_attachments (id, item_id, file_name, mime_type, size, relative_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![attachment.metadata.id, attachment.metadata.item_id, attachment.metadata.file_name, attachment.metadata.mime_type, attachment.metadata.size, attachment.relative_path, attachment.metadata.created_at, attachment.metadata.updated_at]).map_err(|error| error.to_string())?;
+        }
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     pub fn attachment(&self, item_id: String) -> Result<Option<AttachmentDto>, String> {
@@ -479,6 +656,42 @@ impl Database {
         transaction.commit().map_err(|error| error.to_string())?;
         Ok(path)
     }
+}
+
+fn history_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryDto> {
+    let before_json: Option<String> = row.get(3)?;
+    let after_json: Option<String> = row.get(4)?;
+    let mut item_name: Option<String> = row.get(6)?;
+    let mut list_name: Option<String> = row.get(7)?;
+    let mut location: Option<String> = row.get(8)?;
+    if item_name.is_none() || list_name.is_none() || location.is_none() {
+        for snapshot in [after_json.as_deref(), before_json.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Ok(item) = serde_json::from_str::<ItemDto>(snapshot) {
+                item_name = item_name.or(Some(item.name));
+                list_name = list_name.or(Some(item.list_name));
+                location = location.or(Some(item.location));
+                break;
+            }
+        }
+    }
+    Ok(HistoryDto {
+        id: row.get(0)?,
+        item_id: row.get(1)?,
+        action: row.get(2)?,
+        before_json,
+        after_json,
+        created_at: row.get(5)?,
+        item_name,
+        list_name,
+        location,
+    })
+}
+
+fn safe_path(directory: &Path, relative_path: &str) -> std::path::PathBuf {
+    directory.join(Path::new(relative_path).file_name().unwrap_or_default())
 }
 
 fn ensure_list_exists(connection: &Connection, id: &str) -> Result<(), String> {

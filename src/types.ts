@@ -33,6 +33,9 @@ export type HistoryEntry = {
   beforeJson?: string
   afterJson?: string
   createdAt: number
+  itemName?: string
+  listName?: string
+  location?: string
 }
 
 export type Attachment = {
@@ -44,4 +47,29 @@ export type Attachment = {
   createdAt: number
   updatedAt: number
   dataUrl?: string
+}
+
+export type BackupAttachment = {
+  metadata: Omit<Attachment, 'dataUrl'>
+  relativePath: string
+  bytes?: number[]
+  dataUrl?: string
+}
+
+export type BackupData = {
+  format: 'where-account-backup'
+  version: 1
+  exportedAt: number
+  lists: ItemList[]
+  items: Item[]
+  history: HistoryEntry[]
+  attachments: BackupAttachment[]
+}
+
+export type HistoryPage = {
+  entries: HistoryEntry[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
 }

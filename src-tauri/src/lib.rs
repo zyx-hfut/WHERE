@@ -4,7 +4,9 @@ mod account;
 mod db;
 
 use account::{AccountStore, ActiveAccount, AuthSession, AuthState, RegisterResult};
-use db::{AttachmentDto, Database, HistoryDto, ItemDto, ItemInput, ItemListDto};
+use db::{
+    AttachmentDto, BackupData, Database, HistoryDto, HistoryPage, ItemDto, ItemInput, ItemListDto,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
@@ -247,6 +249,51 @@ fn get_item_history(
 }
 
 #[tauri::command]
+fn get_history_page(
+    state: State<'_, AppState>,
+    page: i64,
+    page_size: i64,
+) -> Result<HistoryPage, String> {
+    with_database(&state, |database| database.history_page(page, page_size))
+}
+
+#[tauri::command]
+fn delete_history(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    with_database(&state, |database| database.delete_history(id))
+}
+
+#[tauri::command]
+fn clear_history(state: State<'_, AppState>) -> Result<i64, String> {
+    with_database(&state, |database| database.clear_history())
+}
+
+#[tauri::command]
+fn export_backup(state: State<'_, AppState>) -> Result<BackupData, String> {
+    let active = state
+        .active
+        .lock()
+        .map_err(|_| "账号状态锁定失败".to_string())?;
+    let active = active
+        .as_ref()
+        .ok_or_else(|| "请先登录本地账号".to_string())?;
+    active.database.export_backup(&active.attachments_dir)
+}
+
+#[tauri::command]
+fn import_backup(state: State<'_, AppState>, backup: BackupData) -> Result<(), String> {
+    let mut active = state
+        .active
+        .lock()
+        .map_err(|_| "账号状态锁定失败".to_string())?;
+    let active = active
+        .as_mut()
+        .ok_or_else(|| "请先登录本地账号".to_string())?;
+    active
+        .database
+        .import_backup(&backup, &active.attachments_dir)
+}
+
+#[tauri::command]
 fn get_item_attachment(
     state: State<'_, AppState>,
     item_id: String,
@@ -362,6 +409,37 @@ fn remove_attachment_file(directory: &Path, relative_path: &str) -> Result<(), S
     }
 }
 
+#[cfg(test)]
+mod data_tests {
+    use super::db::{Database, ItemInput};
+
+    #[test]
+    fn paginated_history_keeps_item_details_after_delete() {
+        let path = std::env::temp_dir().join(format!("where-history-{}.db", uuid::Uuid::new_v4()));
+        let mut database = Database::open(&path).expect("database should open");
+        let item = database
+            .create_item(ItemInput {
+                list_id: "placed".into(),
+                name: "test-item".into(),
+                location: "desk".into(),
+                note: None,
+                icon: None,
+            })
+            .expect("item should be created");
+        database
+            .delete_item(item.id)
+            .expect("item should be deleted");
+        let page = database.history_page(1, 1).expect("history should load");
+        assert_eq!(page.total, 2);
+        assert_eq!(page.total_pages, 2);
+        assert_eq!(page.entries[0].item_name.as_deref(), Some("test-item"));
+        database
+            .delete_history(page.entries[0].id)
+            .expect("history should be deleted");
+        assert_eq!(database.history_page(1, 10).unwrap().total, 1);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -395,6 +473,11 @@ pub fn run() {
             update_item,
             delete_item,
             get_item_history,
+            get_history_page,
+            delete_history,
+            clear_history,
+            export_backup,
+            import_backup,
             get_item_attachment,
             read_item_attachment,
             save_item_attachment,

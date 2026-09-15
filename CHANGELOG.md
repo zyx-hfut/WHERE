@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.13.0-data-help] - 2026-09-15
+
+### Added
+
+- 历史记录新增物品名称、所属列表和位置等具体信息；删除后的物品仍可从历史快照中识别。
+- 全局历史记录支持分页、单条删除和清空全部历史。
+- 新增统一 JSON 备份格式，桌面端支持导出/恢复列表、物品、历史和图片附件。
+- 使用说明改为分页介绍，补充列表、分组、搜索、智能体、备份与安全说明。
+- “关于 WHERE”补充 React、TypeScript、Vite、Tauri、Rust、SQLite、RAG 等技术栈信息。
+
+### Fixed
+
+- 修复旧版全局历史仅从当前物品反查、导致已删除物品历史无法显示的问题。
+- 修复备份导出历史记录最多只包含 100 条的问题。
+
+### Verified
+
+- `npm test`
+- `npm run typecheck`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo test`
+
 本文件记录 WHERE 每个可回溯版本的新增功能、修改和修复。
 
 ## [0.12.0-lists-groups] - 2026-09-11

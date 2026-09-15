@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { createItem, createList, deleteItem, deleteItemAttachment, deleteList, exportLocalData, getItemAttachment, getItemHistory, getItems, getLists, importLocalData, readItemAttachment, saveItemAttachment, searchItems, updateItem } from './storage'
+import { clearHistory, createItem, createList, deleteHistory, deleteItem, deleteItemAttachment, deleteList, exportLocalData, getHistoryPage, getItemAttachment, getItemHistory, getItems, getLists, importLocalData, readItemAttachment, saveItemAttachment, searchItems, updateItem } from './storage'
 import { getAuthState, loginAccount, logoutAccount, registerAccount, resetAccountPassword } from './auth'
 import { confirmAgentAction, defaultConfig, describePendingAction, runAgent, runLocalAgent } from './agent'
 import type { AgentAnswer, AgentProviderConfig } from './agent'
@@ -150,8 +150,10 @@ function App() {
     {historyItem && <HistoryModal item={historyItem} history={history} onClose={() => setHistoryItem(null)} />}
     {recoveryKey && <RecoveryModal recoveryKey={recoveryKey} onClose={() => setRecoveryKey('')} />}
     {showSearch && <SearchModal onClose={() => setShowSearch(false)} onSelect={navigateToItem} />}
-    {profileModal && <InfoModal type={profileModal} onClose={() => setProfileModal(null)} />}
-    {showGlobalHistory && <GlobalHistoryModal onClose={() => setShowGlobalHistory(false)} />}
+    {profileModal === 'sync' && <InfoModal type="sync" onClose={() => setProfileModal(null)} />}
+    {profileModal === 'help' && <HelpModal onClose={() => setProfileModal(null)} />}
+    {profileModal === 'about' && <AboutModal onClose={() => setProfileModal(null)} />}
+    {showGlobalHistory && <PaginatedHistoryModal onClose={() => setShowGlobalHistory(false)} />}
   </div>
 }
 
@@ -227,14 +229,38 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (it
   return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">全局搜索</div><h2>搜索物品</h2></div><button className="close-button" onClick={onClose}>×</button></div><input className="search-modal-input" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、位置或备注" />{query && <div className="search-results">{results.length ? results.map((item) => <button key={item.id} onClick={() => onSelect(item)}><strong>{item.name}</strong><span>{item.listName} {item.location}</span>{item.note && <small>{item.note}</small>}</button>) : <div className="history-empty">没有找到相关物品</div>}</div>}<p className="modal-note">支持搜索物品名称、位置和备注。</p></Modal>
 }
 
-function GlobalHistoryModal({ onClose }: { onClose: () => void }) {
-  const [entries, setEntries] = useState<HistoryEntry[]>([])
-  useEffect(() => { void getLists().then(async (lists) => { const items = (await Promise.all(lists.map((list) => getItems(list.id)))).flat(); const all = (await Promise.all(items.map((item) => getItemHistory(item.id)))).flat(); setEntries(all.sort((a, b) => b.createdAt - a.createdAt)) }) }, [])
-  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">全局审计</div><h2>历史记录</h2></div><button className="close-button" onClick={onClose}>×</button></div>{entries.length ? <div className="history-list">{entries.map((entry) => <div className="history-entry" key={`${entry.itemId}-${entry.id}`}><span className="history-dot" /><div><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small></div></div>)}</div> : <div className="history-empty">暂无历史记录</div>}</Modal>
+function PaginatedHistoryModal({ onClose }: { onClose: () => void }) {
+  const [page, setPage] = useState(1)
+  const [data, setData] = useState<import('./types').HistoryPage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const load = () => { setLoading(true); void getHistoryPage(page, 10).then(setData).finally(() => setLoading(false)) }
+  useEffect(load, [page])
+  const remove = async (id: number) => { await deleteHistory(id); load() }
+  const clear = async () => { if (!window.confirm('确定清空全部历史记录吗？')) return; await clearHistory(); setPage(1); load() }
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">全局审计</div><h2>历史记录</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="history-toolbar"><span className="muted">共 {data?.total || 0} 条记录</span><button className="danger-text" disabled={!data?.total} onClick={() => void clear()}>清空历史</button></div>{loading ? <div className="history-empty">正在加载…</div> : data?.entries.length ? <div className="history-list">{data.entries.map((entry) => <div className="history-entry detailed" key={entry.id}><span className="history-dot" /><div className="history-entry-copy"><strong>{actionLabels[entry.action]}</strong><small>{formatTime(entry.createdAt)}</small><p><b>{entry.itemName || '已删除物品'}</b>{entry.listName ? `　${entry.listName}` : ''}{entry.location ? `　·　${entry.location}` : ''}</p>{entry.action === 'updated' && entry.beforeJson && entry.afterJson && <small>{safeLocation(entry.beforeJson)} → {safeLocation(entry.afterJson)}</small>}</div><button className="danger-text" onClick={() => void remove(entry.id)}>删除</button></div>)}</div> : <div className="history-empty">暂无历史记录</div>}<div className="pagination"><button className="toolbar-button" disabled={!data || data.page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</button><span>{data?.totalPages ? `${data.page} / ${data.totalPages}` : '0 / 0'}</span><button className="toolbar-button" disabled={!data || data.page >= data.totalPages} onClick={() => setPage((value) => value + 1)}>下一页</button></div></Modal>
 }
 
-function InfoModal({ type, onClose }: { type: 'sync' | 'help' | 'about'; onClose: () => void }) {
-  const content = type === 'sync' ? { title: '设备同步', eyebrow: 'SYNC', text: '同步协议正在规划中。当前版本的数据保存在本机账号数据库，尚未启用 PC 与手机之间的传输。' } : type === 'help' ? { title: '使用说明', eyebrow: 'HELP', text: '在物品页面添加名称和位置；智能体页面可以查询或规划操作；所有写操作都会先展示预览并等待确认。' } : { title: '关于 WHERE', eyebrow: 'ABOUT', text: 'WHERE 是一个开源、本地优先的物品位置记录工具。当前版本支持 SQLite、账号、图片、RAG 智能体和确认式写操作。' }
+function safeLocation(json: string) { try { return (JSON.parse(json) as { location?: string }).location || '未知位置' } catch { return '未知位置' } }
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  const pages = [
+    ['快速开始', '在“物品位置”页面选择列表，点击“添加物品”，填写名称、位置和可选备注即可。每条记录都保存在当前本地账号中。'],
+    ['列表与展示', '列表用于区分“放在”“存有”或自定义分类。你可以新建列表、批量选择并删除空列表，还可以按位置、按物品名称分组并折叠查看。'],
+    ['搜索与历史', '搜索支持物品名称、位置和备注。每次新建、修改、删除及图片变更都会留下历史；历史记录支持查看具体快照、分页、单条删除和清空。'],
+    ['智能体', '智能体可以查询、添加、修改、移动、删除物品以及管理列表。复杂请求会先拆解成原子工具步骤，展示检索、规划和预览，写操作必须由你确认。'],
+    ['备份与安全', '“我的”中可以导出当前账号的 JSON 备份，也可以选择备份文件恢复。桌面端数据位于本机账号数据库，Provider API Key 使用系统凭据库保存。'],
+  ]
+  const [page, setPage] = useState(0)
+  const [title, text] = pages[page]
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">HELP · {page + 1}/{pages.length}</div><h2>使用说明</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="help-page"><h3>{title}</h3><p className="info-modal-text">{text}</p></div><div className="pagination"><button className="toolbar-button" disabled={!page} onClick={() => setPage((value) => value - 1)}>上一页</button><span>{page + 1} / {pages.length}</span><button className="toolbar-button" disabled={page === pages.length - 1} onClick={() => setPage((value) => value + 1)}>下一页</button></div></Modal>
+}
+
+function AboutModal({ onClose }: { onClose: () => void }) {
+  return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">ABOUT</div><h2>关于 WHERE</h2></div><button className="close-button" onClick={onClose}>×</button></div><div className="about-content"><p>WHERE 是一个开源、本地优先的物品位置记录工具，目标是让记录、查找和整理身边物品变得简单流畅。</p><dl><dt>前端</dt><dd>React + TypeScript + Vite</dd><dt>桌面端</dt><dd>Tauri 2 + Rust</dd><dt>数据层</dt><dd>SQLite、WAL、本地账号隔离</dd><dt>智能体</dt><dd>LLM Provider + RAG 能力文档 + 工具规划与确认式执行</dd><dt>工程</dt><dd>Vitest 测试、Git 版本管理、MIT License</dd></dl><p className="modal-note">当前版本 0.13.0。PC 与手机同步协议仍在后续阶段规划。</p></div><button className="primary-button" onClick={onClose}>知道了</button></Modal>
+}
+
+function InfoModal({ type, onClose }: { type: 'sync'; onClose: () => void }) {
+  const content = { title: '设备同步', eyebrow: 'SYNC', text: '同步协议正在规划中。当前版本的数据保存在本机账号数据库，尚未启用 PC 与手机之间的传输。' }
   return <Modal onClose={onClose}><div className="modal-heading"><div><div className="eyebrow">{content.eyebrow}</div><h2>{content.title}</h2></div><button className="close-button" onClick={onClose}>×</button></div><p className="info-modal-text">{content.text}</p><button className="primary-button" onClick={onClose}>知道了</button></Modal>
 }
 

@@ -1,0 +1,14 @@
+.history-toolbar,
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pagination { margin-top: 20px; justify-content: center; }
+.history-entry.detailed { align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.history-entry-copy { min-width: 0; flex: 1; }
+.history-entry.detailed > .danger-text { color: #bd6a63; background: transparent; font-size: 10px; }
+.help-page { min-height: 145px; padding: 16px; border-radius: 10px; background: var(--surface-soft); }
+.help-page h3 { margin: 0 0 12px; font-size: 15px; }
+.help-page p { margin: 0; }
+.about-content { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.about-content p { margin: 0 0 14px; }
+.about-content dl { display: grid; grid-template-columns: 74px 1fr; gap: 8px 12px; margin: 15px 0; }
+.about-content dt { color: var(--text); font-weight: 700; }
+.about-content dd { margin: 0; }
