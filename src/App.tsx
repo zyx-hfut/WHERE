@@ -8,6 +8,7 @@ import { getProviderApiKey, saveProviderApiKey } from './provider-secrets'
 import { createConversation, deleteConversations, loadConversations, saveConversations, titleFromMessage } from './conversations'
 import type { Conversation, ConversationMessage } from './conversations'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
+import { checkForAppUpdate, installAppUpdate } from './updater'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
 
@@ -123,7 +124,7 @@ function App() {
 
   const navigateToItem = (item: Item) => { setActiveList(item.listId); setPage('items'); setShowSearch(false) }
   const exportBackup = async () => {
-    try { const content = await exportLocalData(); const blob = new Blob([content], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `where-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url) }
+    try { const content = await exportLocalData(); if (!content) { setError('备份已保存'); return } const blob = new Blob([content], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `where-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); setError('备份已保存') }
     catch (cause) { setError(cause instanceof Error ? cause.message : '导出备份失败') }
   }
   const importBackup = async (file: File) => { try { await importLocalData(await file.text()); await refreshLists(); setItems(await getItems(activeList)); setError('备份已恢复') } catch (cause) { setError(cause instanceof Error ? cause.message : '恢复备份失败') } }
@@ -156,7 +157,28 @@ function App() {
     {profileModal === 'help' && <HelpModal onClose={() => setProfileModal(null)} />}
     {profileModal === 'about' && <AboutModal onClose={() => setProfileModal(null)} />}
     {showGlobalHistory && <PaginatedHistoryModal onClose={() => setShowGlobalHistory(false)} />}
+    <UpdateCenter />
   </div>
+}
+
+function UpdateCenter() {
+  const [state, setState] = useState<{ status: 'idle' | 'checking' | 'none' | 'available' | 'installing' | 'error'; message?: string; update?: import('@tauri-apps/plugin-updater').Update; progress?: number }>({ status: 'idle' })
+  const checkUpdate = async () => {
+    setState({ status: 'checking' })
+    try {
+      const result = await checkForAppUpdate()
+      if (result.kind === 'unsupported') setState({ status: 'error', message: '浏览器模式不支持在线更新，请使用桌面版。' })
+      else if (result.kind === 'none') setState({ status: 'none', message: '当前已是最新版本。' })
+      else setState({ status: 'available', update: result.update, message: `发现新版本 ${result.update.version}` })
+    } catch (cause) { setState({ status: 'error', message: cause instanceof Error ? cause.message : '检查更新失败' }) }
+  }
+  const install = async () => {
+    if (!state.update) return
+    setState({ ...state, status: 'installing', progress: 0 })
+    try { await installAppUpdate(state.update, (progress) => setState((current) => ({ ...current, progress }))) }
+    catch (cause) { setState({ status: 'error', message: cause instanceof Error ? cause.message : '安装更新失败' }) }
+  }
+  return <div className="update-center"><button className="update-button" onClick={() => void checkUpdate()} disabled={state.status === 'checking' || state.status === 'installing'}>↻ 检查更新</button>{state.message && <div className={`update-message ${state.status}`}><span>{state.message}{state.status === 'installing' && state.progress !== undefined ? ` ${state.progress}%` : ''}</span>{state.status === 'available' && <button className="primary-button" onClick={() => void install()}>立即更新</button>}<button className="update-dismiss" onClick={() => setState({ status: 'idle' })}>×</button></div>}</div>
 }
 
 function NavButton({ active, icon, label, badge, onClick }: { active: boolean; icon: string; label: string; badge?: string; onClick: () => void }) {

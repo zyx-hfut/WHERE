@@ -305,6 +305,20 @@ fn export_backup_file(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
 }
 
 #[tauri::command]
+fn export_backup_to_path(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let active = state
+        .active
+        .lock()
+        .map_err(|_| "账号状态锁定失败".to_string())?;
+    let active = active
+        .as_ref()
+        .ok_or_else(|| "请先登录本地账号".to_string())?;
+    let backup = active.database.export_backup(&active.attachments_dir)?;
+    let content = serde_json::to_vec_pretty(&backup).map_err(|error| error.to_string())?;
+    std::fs::write(path, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn import_backup(state: State<'_, AppState>, backup: BackupData) -> Result<(), String> {
     let mut active = state
         .active
@@ -316,6 +330,14 @@ fn import_backup(state: State<'_, AppState>, backup: BackupData) -> Result<(), S
     active
         .database
         .import_backup(&backup, &active.attachments_dir)
+}
+
+#[tauri::command]
+fn import_backup_from_path(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let content = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let backup = serde_json::from_str::<BackupData>(&content)
+        .map_err(|error| format!("备份文件格式错误：{}", error))?;
+    import_backup(state, backup)
 }
 
 #[tauri::command]
@@ -478,6 +500,18 @@ pub fn run() {
                 accounts: Mutex::new(accounts),
                 active: Mutex::new(None),
             });
+            #[cfg(windows)]
+            app.handle()
+                .plugin(tauri_plugin_dialog::init())
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            #[cfg(windows)]
+            app.handle()
+                .plugin(tauri_plugin_process::init())
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            #[cfg(windows)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -503,7 +537,9 @@ pub fn run() {
             clear_history,
             export_backup,
             export_backup_file,
+            export_backup_to_path,
             import_backup,
+            import_backup_from_path,
             get_item_attachment,
             read_item_attachment,
             save_item_attachment,

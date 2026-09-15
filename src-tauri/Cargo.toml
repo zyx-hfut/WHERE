@@ -1,6 +1,6 @@
 [package]
 name = "where"
-version = "0.13.1"
+version = "0.14.0"
 description = "A local-first item location app"
 authors = ["ZYX"]
 edition = "2021"
@@ -21,3 +21,8 @@ uuid = { version = "1.18.1", features = ["v4"] }
 argon2 = "0.5.3"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 keyring = { version = "4.2.0", features = ["windows-native-keyring-store"] }
+
+[target."cfg(windows)".dependencies]
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.11.0"

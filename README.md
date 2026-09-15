@@ -1,5 +1,15 @@
 # WHERE
 
+当前版本：`v0.14.0-dialog-updater`。桌面端备份支持用户选择保存位置，并已接入签名校验的在线更新框架。
+
+## 桌面端备份与在线更新
+
+- 桌面端点击“我的 → 备份与恢复”后，会弹出系统保存对话框，用户可以选择任意可写目录和文件名。
+- 浏览器开发模式仍使用浏览器下载功能。
+- 桌面端的“检查更新”按钮会访问 GitHub Release 的静态更新清单；发现新版本后可在应用内下载安装。
+- 更新包必须经过 Tauri 签名。发布前需要在 GitHub 仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，私钥不能提交到 Git。
+- `.github/workflows/release.yml` 会在推送 `v*` tag 时构建 Windows 安装包并发布更新资源。
+
 当前补丁版本：`v0.13.1-backup-fix`。桌面端备份会写入系统下载目录，并兼容跨端附件备份恢复。
 
 ## v0.13.0 数据与帮助

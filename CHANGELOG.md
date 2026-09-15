@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.14.0-dialog-updater] - 2026-09-15
+
+### Added
+
+- 桌面端备份使用系统保存对话框，用户可以自行选择保存位置和文件名。
+- 备份保存成功后显示明确提示；浏览器模式继续使用浏览器下载。
+- 接入 Tauri 原生更新检查、下载、签名校验和安装重启流程。
+- 增加 GitHub Actions 发布工作流，按 `v*` tag 构建并发布 Windows 更新包。
+- 增加更新签名公钥配置，私钥仅通过本地环境变量或 GitHub Secrets 使用。
+
+### Configuration
+
+- 在线更新依赖 GitHub Release 中的 `latest.json` 和签名安装包。
+- 发布前需要在 GitHub Actions Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY`；私钥不得提交到仓库。
+
 ## [0.13.1-backup-fix] - 2026-09-15
 
 ### Fixed

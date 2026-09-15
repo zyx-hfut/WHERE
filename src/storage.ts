@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type { Attachment, BackupData, HistoryEntry, HistoryPage, Item, ItemInput, ItemList } from './types'
 import { getCurrentAccountId } from './auth'
 import { rankByCosine } from './vector-match'
@@ -58,8 +59,13 @@ export async function searchItems(query: string): Promise<Item[]> {
 
 export async function exportLocalData(): Promise<string> {
   if (isTauri()) {
-    await invoke<string>('export_backup_file')
-    return JSON.stringify(await invoke<BackupData>('export_backup'), null, 2)
+    const path = await save({
+      defaultPath: `where-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'WHERE 备份', extensions: ['json'] }],
+    })
+    if (!path) return ''
+    await invoke('export_backup_to_path', { path })
+    return ''
   }
   const state = readLocal()
   const attachments = Object.values(state.attachments || {}).map((attachment) => ({
@@ -68,6 +74,18 @@ export async function exportLocalData(): Promise<string> {
     dataUrl: attachment.dataUrl,
   }))
   return JSON.stringify({ format: 'where-account-backup', version: 1, exportedAt: Date.now(), lists: state.lists, items: state.items, history: state.history, attachments }, null, 2)
+}
+
+export async function importBackupFromUserPath(): Promise<string | null> {
+  if (!isTauri()) return null
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: 'WHERE 备份', extensions: ['json'] }],
+  })
+  if (!path || Array.isArray(path)) return null
+  await invoke('import_backup_from_path', { path })
+  return path
 }
 
 export async function exportBackupFile(): Promise<string | null> {
