@@ -57,7 +57,10 @@ export async function searchItems(query: string): Promise<Item[]> {
 }
 
 export async function exportLocalData(): Promise<string> {
-  if (isTauri()) return JSON.stringify(await invoke<BackupData>('export_backup'), null, 2)
+  if (isTauri()) {
+    await invoke<string>('export_backup_file')
+    return JSON.stringify(await invoke<BackupData>('export_backup'), null, 2)
+  }
   const state = readLocal()
   const attachments = Object.values(state.attachments || {}).map((attachment) => ({
     metadata: { ...attachment, dataUrl: undefined },
@@ -65,6 +68,19 @@ export async function exportLocalData(): Promise<string> {
     dataUrl: attachment.dataUrl,
   }))
   return JSON.stringify({ format: 'where-account-backup', version: 1, exportedAt: Date.now(), lists: state.lists, items: state.items, history: state.history, attachments }, null, 2)
+}
+
+export async function exportBackupFile(): Promise<string | null> {
+  if (isTauri()) return invoke<string>('export_backup_file')
+  const content = await exportLocalData()
+  const blob = new Blob([content], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `where-backup-${new Date().toISOString().slice(0, 10)}.json`
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return anchor.download
 }
 
 export async function importLocalData(serialized: string): Promise<void> {

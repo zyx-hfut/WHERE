@@ -42,6 +42,8 @@ function App() {
     const nextLists = await getLists()
     setLists(nextLists)
     if (nextLists.length && (!nextLists.some((list) => list.id === activeList) || preferredId)) setActiveList(preferredId || nextLists[0].id)
+    if (nextLists.length && !nextLists.some((list) => list.id === activeList)) setItems(await getItems(preferredId || nextLists[0].id))
+    if (!nextLists.length) setItems([])
     return nextLists
   }
 

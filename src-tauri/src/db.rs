@@ -43,7 +43,8 @@ pub struct HistoryDto {
 pub struct BackupAttachment {
     pub metadata: AttachmentDto,
     pub relative_path: String,
-    pub bytes: Vec<u8>,
+    #[serde(default)]
+    pub bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -498,7 +499,7 @@ impl Database {
             attachments.push(BackupAttachment {
                 metadata,
                 relative_path,
-                bytes,
+                bytes: Some(bytes),
             });
         }
         Ok(BackupData {
@@ -522,11 +523,10 @@ impl Database {
         }
         std::fs::create_dir_all(attachments_dir).map_err(|error| error.to_string())?;
         for attachment in &backup.attachments {
-            std::fs::write(
-                safe_path(attachments_dir, &attachment.relative_path),
-                &attachment.bytes,
-            )
-            .map_err(|error| error.to_string())?;
+            if let Some(bytes) = &attachment.bytes {
+                std::fs::write(safe_path(attachments_dir, &attachment.relative_path), bytes)
+                    .map_err(|error| error.to_string())?;
+            }
         }
         let transaction = self
             .connection

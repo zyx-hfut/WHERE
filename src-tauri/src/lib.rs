@@ -280,6 +280,31 @@ fn export_backup(state: State<'_, AppState>) -> Result<BackupData, String> {
 }
 
 #[tauri::command]
+fn export_backup_file(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let active = state
+        .active
+        .lock()
+        .map_err(|_| "账号状态锁定失败".to_string())?;
+    let active = active
+        .as_ref()
+        .ok_or_else(|| "请先登录本地账号".to_string())?;
+    let backup = active.database.export_backup(&active.attachments_dir)?;
+    let directory = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let path = directory.join(format!("where-backup-{}.json", timestamp));
+    let content = serde_json::to_vec_pretty(&backup).map_err(|error| error.to_string())?;
+    std::fs::write(&path, content).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn import_backup(state: State<'_, AppState>, backup: BackupData) -> Result<(), String> {
     let mut active = state
         .active
@@ -477,6 +502,7 @@ pub fn run() {
             delete_history,
             clear_history,
             export_backup,
+            export_backup_file,
             import_backup,
             get_item_attachment,
             read_item_attachment,
