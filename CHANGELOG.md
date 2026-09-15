@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2-bundle-fix] - 2026-09-15
+
+### Fixed
+
+- 明确配置 Windows/Linux/macOS 打包图标路径，修复 GitHub Actions 构建 MSI 时找不到 `.ico` 图标的问题。
+- 将 GitHub Actions 的 checkout 和 setup-node 升级到 Node.js 24 兼容版本，减少 Node.js 20 弃用警告。
+
 ## [0.14.1-updater-key-rotation] - 2026-09-15
 
 ### Security
