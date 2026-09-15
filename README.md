@@ -1,6 +1,6 @@
 # WHERE
 
-当前版本：`v0.14.2-bundle-fix`。桌面端备份支持用户选择保存位置，并已接入签名校验的在线更新框架。
+当前版本：`v0.14.3-runtime-fix`。桌面端备份支持用户选择保存位置，并已接入签名校验的在线更新框架。
 
 ## 桌面端备份与在线更新
 
@@ -9,6 +9,7 @@
 - 桌面端的“检查更新”按钮会访问 GitHub Release 的静态更新清单；发现新版本后可在应用内下载安装。
 - 更新包必须经过 Tauri 签名。发布前需要在 GitHub 仓库 Secrets 中配置 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，私钥不能提交到 Git。
 - `.github/workflows/release.yml` 会在推送 `v*` tag 时构建 Windows 安装包并发布更新资源。
+- `npm run tauri:dev` 使用独立的开发数据目录，不会与正式安装版共享账号数据库。
 
 当前补丁版本：`v0.13.1-backup-fix`。桌面端备份会写入系统下载目录，并兼容跨端附件备份恢复。
 
