@@ -9,6 +9,7 @@ import { createConversation, deleteConversations, loadConversations, saveConvers
 import type { Conversation, ConversationMessage } from './conversations'
 import type { HistoryEntry, Item, ItemInput, ItemList, Page } from './types'
 import { checkForAppUpdate, installAppUpdate } from './updater'
+import { InteractiveKnowledgeGraph } from './InteractiveKnowledgeGraph'
 
 type ComposerState = { mode: 'create' | 'edit'; item?: Item } | null
 
@@ -145,7 +146,7 @@ function App() {
     </aside>
     <main className="main-content">
       {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} onGraph={() => setPage('graph')} />}
-      {page === 'graph' && <KnowledgeGraphPage lists={lists} activeList={activeList} items={items} onSelectList={setActiveList} onBack={() => setPage('items')} />}
+      {page === 'graph' && <InteractiveKnowledgeGraph lists={lists} activeList={activeList} items={items} onSelectList={setActiveList} onBack={() => setPage('items')} />}
       {page === 'agent' && <AgentConversationPage onNavigateToItems={() => setPage('items')} />}
         {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} onSync={() => setProfileModal('sync')} onHelp={() => setProfileModal('help')} onAbout={() => setProfileModal('about')} onHistory={() => setShowGlobalHistory(true)} onExport={exportBackup} onImport={importBackup} />}
     </main>

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0-graph-android] - 2026-09-16
+
+### Added
+
+- 知识图谱升级为可运动、可拖拽的轻量 SVG 图谱。
+- 节点悬停时显示物品所属列表、位置和备注等详细信息。
+- 增加暂停/继续运动控制，避免图谱持续运动影响查看。
+- 增加 Android PC 调试文档，说明 JDK、Android SDK、模拟器和 `adb` 配置。
+
+### Known limitations
+
+- 当前开发机缺少 JDK 和 Android SDK，Android 工程尚未初始化；安装环境后可执行 `npm run tauri android init`。
+
 ## [0.15.0-graph-updater] - 2026-09-16
 
 ### Added
