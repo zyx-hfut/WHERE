@@ -13,7 +13,13 @@ function isTauri() {
 
 export async function checkForAppUpdate(): Promise<UpdateState> {
   if (!isTauri()) return { kind: 'unsupported' }
-  const update = await check({ timeout: 10_000 })
+  let update: Update | null
+  try {
+    update = await check({ timeout: 30_000 })
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause)
+    throw new Error(`无法访问更新清单（GitHub latest.json）：${detail}`)
+  }
   if (!update) return { kind: 'none', currentVersion: await getVersion() }
   return { kind: 'available', update }
 }

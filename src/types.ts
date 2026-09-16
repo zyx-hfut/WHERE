@@ -1,4 +1,4 @@
-export type Page = 'items' | 'agent' | 'profile'
+export type Page = 'items' | 'graph' | 'agent' | 'profile'
 
 export type ItemList = {
   id: string

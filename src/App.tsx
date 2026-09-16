@@ -137,13 +137,15 @@ function App() {
       <div className="workspace-label">我的空间</div>
       <nav className="main-nav" aria-label="主导航">
         <NavButton active={page === 'items'} icon="⌂" label="物品位置" onClick={() => setPage('items')} />
+        <NavButton active={page === 'graph'} icon="◉" label="知识图谱" onClick={() => setPage('graph')} />
         <NavButton active={page === 'agent'} icon="✦" label="智能体" onClick={() => setPage('agent')} badge="Beta" />
         <NavButton active={page === 'profile'} icon="○" label="我的" onClick={() => setPage('profile')} />
       </nav>
       <div className="sidebar-foot"><div className="sync-state"><span className="status-dot" />本地数据已保存</div><div className="build-label">WHERE 0.12.0 · Lists & Groups</div></div>
     </aside>
     <main className="main-content">
-      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} />}
+      {page === 'items' && <ItemsPage lists={lists} activeList={activeList} activeListName={activeListName} items={items} loading={loading} onSelectList={setActiveList} onAdd={() => setComposer({ mode: 'create' })} onEdit={(item) => setComposer({ mode: 'edit', item })} onDelete={removeItem} onHistory={showHistory} onAddList={() => setShowListComposer(true)} onDeleteLists={removeLists} onSearch={() => setShowSearch(true)} onGraph={() => setPage('graph')} />}
+      {page === 'graph' && <KnowledgeGraphPage lists={lists} activeList={activeList} items={items} onSelectList={setActiveList} onBack={() => setPage('items')} />}
       {page === 'agent' && <AgentConversationPage onNavigateToItems={() => setPage('items')} />}
         {page === 'profile' && <ProfilePage username={username} theme={theme} setTheme={setTheme} onLogout={handleLogout} onSync={() => setProfileModal('sync')} onHelp={() => setProfileModal('help')} onAbout={() => setProfileModal('about')} onHistory={() => setShowGlobalHistory(true)} onExport={exportBackup} onImport={importBackup} />}
     </main>
@@ -185,7 +187,7 @@ function NavButton({ active, icon, label, badge, onClick }: { active: boolean; i
   return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}><span className="icon" aria-hidden="true">{icon}</span><span>{label}</span>{badge && <small>{badge}</small>}</button>
 }
 
-function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists, onSearch }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void; onSearch: () => void }) {
+function ItemsPage({ lists, activeList, activeListName, items, loading, onSelectList, onAdd, onEdit, onDelete, onHistory, onAddList, onDeleteLists, onSearch, onGraph }: { lists: ItemList[]; activeList: string; activeListName: string; items: Item[]; loading: boolean; onSelectList: (id: string) => void; onAdd: () => void; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void; onAddList: () => void; onDeleteLists: (ids: string[]) => void; onSearch: () => void; onGraph: () => void }) {
   const [manage, setManage] = useState(false)
   const [groupMode, setGroupMode] = useState<'none' | 'location' | 'name'>('location')
   const [selected, setSelected] = useState<string[]>([])
@@ -193,7 +195,7 @@ function ItemsPage({ lists, activeList, activeListName, items, loading, onSelect
   const exitManage = () => { setManage(false); setSelected([]) }
   return <>
     <header className="topbar"><div><div className="eyebrow">我的物品</div><h1>物品位置</h1></div><div className="topbar-actions"><button className="ghost-button" title="搜索" onClick={onSearch}>⌕ <span>搜索</span><kbd>⌘ K</kbd></button><button className="avatar">Z</button></div></header>
-    <section className="page-intro"><p>把重要的东西，放在记得住的地方。</p><button className="primary-button" onClick={onAdd}><span>＋</span> 添加物品</button></section>
+    <section className="page-intro"><p>把重要的东西，放在记得住的地方。</p><div className="page-intro-actions"><button className="secondary-button" onClick={onGraph}>知识图谱</button><button className="primary-button" onClick={onAdd}><span>＋</span> 添加物品</button></div></section>
     <div className="list-toolbar"><span className="muted">{manage ? `已选择 ${selected.length} 个列表` : '物品列表'}</span><div>{manage ? <><button className="toolbar-button danger" disabled={!selected.length} onClick={() => { onDeleteLists(selected); exitManage() }}>删除选中</button><button className="toolbar-button" onClick={exitManage}>完成</button></> : <button className="toolbar-button" onClick={() => setManage(true)}>管理列表</button>}</div></div>
     <div className="list-tabs" role="tablist" aria-label="物品列表">{lists.map((list) => manage ? <label key={list.id} className={`list-tab manage-tab ${selected.includes(list.id) ? 'selected' : ''}`}><input type="checkbox" checked={selected.includes(list.id)} onChange={() => toggle(list.id)} /><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></label> : <button key={list.id} role="tab" aria-selected={activeList === list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}><span className="tab-icon">{list.icon}</span><span>{list.name}</span><span className="tab-count">{list.count}</span></button>)}<button className="add-list-button" title="新建列表" onClick={onAddList}>＋</button></div>
     <section className="items-panel"><div className="panel-heading"><div><h2>{activeListName}</h2><span className="muted">按最近更新排序 · 本地数据库</span></div><div className="group-switcher" role="group" aria-label="展示方式"><button className={groupMode === 'location' ? 'selected' : ''} onClick={() => setGroupMode('location')}>按位置</button><button className={groupMode === 'name' ? 'selected' : ''} onClick={() => setGroupMode('name')}>按物品</button><button className={groupMode === 'none' ? 'selected' : ''} onClick={() => setGroupMode('none')}>平铺</button></div></div>
@@ -201,6 +203,18 @@ function ItemsPage({ lists, activeList, activeListName, items, loading, onSelect
     </section>
     <div className="hint-bar"><span className="hint-key">⌁</span><span>物品写入本地 SQLite，并为每次新建、修改和删除保留历史记录</span></div>
   </>
+}
+
+function KnowledgeGraphPage({ lists, activeList, items, onSelectList, onBack }: { lists: ItemList[]; activeList: string; items: Item[]; onSelectList: (id: string) => void; onBack: () => void }) {
+  const locations = [...new Set(items.map((item) => item.location.trim()).filter(Boolean))]
+  const width = 900
+  const height = Math.max(420, Math.max(items.length, locations.length) * 58 + 80)
+  const itemX = 190
+  const locationX = 700
+  const itemY = (index: number) => 55 + index * (height - 110) / Math.max(1, items.length - 1)
+  const locationY = (index: number) => 55 + index * (height - 110) / Math.max(1, locations.length - 1)
+  const short = (value: string, max = 18) => value.length > max ? `${value.slice(0, max)}…` : value
+  return <><header className="topbar"><div><div className="eyebrow">轻量知识图谱</div><h1>{lists.find((list) => list.id === activeList)?.name || '物品'}图谱</h1></div><button className="outline-button" onClick={onBack}>返回物品</button></header><div className="graph-toolbar"><span className="muted">每条边表示“物品 —所属列表关系→ 位置”，数据只读取当前账号。</span><div className="list-tabs graph-list-tabs">{lists.map((list) => <button key={list.id} className={`list-tab ${activeList === list.id ? 'active' : ''}`} onClick={() => onSelectList(list.id)}>{list.icon} {list.name} <span className="tab-count">{list.count}</span></button>)}</div></div>{items.length ? <section className="graph-panel"><svg className="knowledge-graph" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="物品位置知识图谱"><defs><marker id="graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" /></marker></defs>{items.map((item, index) => { const locationIndex = locations.indexOf(item.location.trim()); const y1 = itemY(index); const y2 = locationY(locationIndex); return <g key={item.id}><line className="graph-edge" x1={itemX + 82} y1={y1} x2={locationX - 92} y2={y2} markerEnd="url(#graph-arrow)" /><text className="graph-edge-label" x={(itemX + locationX) / 2} y={(y1 + y2) / 2 - 5}>放在</text></g> })}<g className="graph-root"><circle cx="width" cy="0" r="0" /><text x="450" y="26" textAnchor="middle" className="graph-title">{lists.find((list) => list.id === activeList)?.name || '列表'} · 物品与位置关系</text></g>{items.map((item, index) => <g className="graph-node item-node" key={`item-${item.id}`}><circle cx={itemX} cy={itemY(index)} r="30" /><text x={itemX} y={itemY(index) + 4} textAnchor="middle">{short(item.name, 9)}</text></g>)}{locations.map((location, index) => <g className="graph-node location-node" key={`location-${location}`}><rect x={locationX - 82} y={locationY(index) - 27} width="164" height="54" rx="14" /><text x={locationX} y={locationY(index) + 4} textAnchor="middle">{short(location, 16)}</text></g>)}</svg><div className="graph-legend"><span><i className="legend-item" />物品</span><span><i className="legend-location" />位置</span><span>可自动按列表切换</span></div></section> : <div className="graph-empty"><div className="empty-art">◉</div><h3>当前列表还没有图谱</h3><p>添加物品和位置后，关系图会自动生成。</p></div>}</>
 }
 
 function GroupedItems({ items, mode, onEdit, onDelete, onHistory }: { items: Item[]; mode: 'none' | 'location' | 'name'; onEdit: (item: Item) => void; onDelete: (item: Item) => void; onHistory: (item: Item) => void }) {
